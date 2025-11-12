@@ -1,0 +1,159 @@
+// include/roole/node/node_state.h
+// Node state (unified, unchanged from original but re-organized dependencies)
+
+#ifndef ROOLE_NODE_STATE_H
+#define ROOLE_NODE_STATE_H
+
+#include "roole/core/common.h"
+#include "roole/core/config.h"
+#include "roole/dag/dag.h"
+#include "roole/core/metrics.h"
+#include "roole/core/metrics_server.h"
+#include "roole/core/event_bus.h"
+#include "roole/cluster/cluster_view.h"
+#include "roole/cluster/membership.h"
+#include "roole/node/peer_pool.h"
+#include "roole/node/execution_tracker.h"
+#include "roole/node/message_queue.h"
+#include "roole/node/node_capabilities.h"
+#include <pthread.h>
+
+// Node identity (immutable after initialization)
+typedef struct {
+    node_id_t node_id;
+    node_type_t node_type;
+    char cluster_name[64];
+    char bind_addr[MAX_IP_LEN];
+    uint16_t gossip_port;
+    uint16_t data_port;
+    uint16_t ingress_port;
+    uint16_t metrics_port;
+} node_identity_t;
+
+// Node state (single source of truth)
+typedef struct node_state {
+    // Identity (immutable)
+    node_identity_t identity;
+    node_capabilities_t capabilities;
+    
+    // Owned subsystems
+    dag_catalog_t *dag_catalog;
+    peer_pool_t *peer_pool;
+    execution_tracker_t *exec_tracker;
+    message_queue_t *message_queue;
+    
+    // Cluster membership (owns the view)
+    cluster_view_t *cluster_view;
+    membership_handle_t *membership;
+    
+    // Observability
+    metrics_registry_t *metrics_registry;
+    metrics_server_t *metrics_server;
+    event_bus_t *event_bus;
+    
+    // Metrics references (for fast access)
+    metrics_t *metric_cluster_members_total;
+    metrics_t *metric_cluster_members_active;
+    metrics_t *metric_cluster_members_suspect;
+    metrics_t *metric_cluster_members_dead;
+    metrics_t *metric_messages_processed;
+    metrics_t *metric_messages_failed;
+    metrics_t *metric_messages_routed;
+    metrics_t *metric_queue_size;
+    metrics_t *metric_active_executions;
+    metrics_t *metric_uptime_seconds;
+    metrics_t *metric_dag_catalog_size;
+    
+    histogram_metric_t *histogram_exec_duration;
+    histogram_metric_t *histogram_queue_wait;
+    histogram_metric_t *histogram_message_size;
+    histogram_metric_t *histogram_gossip_rtt;
+    
+    // Lifecycle
+    uint64_t start_time_ms;
+    volatile int shutdown_flag;
+    
+    // Worker threads
+    pthread_t *executor_threads;
+    size_t num_executor_threads;
+    pthread_t cleanup_thread;
+    pthread_t metrics_update_thread;
+    
+    // Statistics (atomic counters)
+    _Atomic uint32_t active_executions;
+    _Atomic uint64_t messages_processed;
+    _Atomic uint64_t messages_failed;
+    _Atomic uint64_t messages_routed;
+    
+    // Synchronization for startup
+    volatile int rpc_server_ready;
+    pthread_mutex_t rpc_ready_lock;
+    pthread_cond_t rpc_ready_cond;
+} node_state_t;
+
+/**
+ * Initialize node state
+ * Allocates and initializes all subsystems
+ * @param state Output state pointer
+ * @param config Configuration
+ * @param num_executor_threads Number of executor threads
+ * @return result_t (RESULT_OK or error)
+ */
+result_t node_state_init(node_state_t **state, const roole_config_t *config,
+                         size_t num_executor_threads);
+
+/**
+ * Start node
+ * Starts all background threads, RPC servers
+ * @param state Node state
+ * @return result_t
+ */
+result_t node_state_start(node_state_t *state);
+
+/**
+ * Bootstrap node (join cluster)
+ * @param state Node state
+ * @param config Configuration
+ * @return result_t
+ */
+result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config);
+
+/**
+ * Shutdown node
+ * Stops all threads, closes connections
+ * @param state Node state
+ */
+void node_state_shutdown(node_state_t *state);
+
+/**
+ * Destroy node state
+ * Frees all resources
+ * @param state Node state
+ */
+void node_state_destroy(node_state_t *state);
+
+// Accessors (read-only access to internal state)
+const node_identity_t* node_state_get_identity(const node_state_t *state);
+const node_capabilities_t* node_state_get_capabilities(const node_state_t *state);
+dag_catalog_t* node_state_get_dag_catalog(node_state_t *state);
+peer_pool_t* node_state_get_peer_pool(node_state_t *state);
+execution_tracker_t* node_state_get_exec_tracker(node_state_t *state);
+message_queue_t* node_state_get_message_queue(node_state_t *state);
+cluster_view_t* node_state_get_cluster_view(node_state_t *state);
+metrics_registry_t* node_state_get_metrics(node_state_t *state);
+event_bus_t* node_state_get_event_bus(node_state_t *state);
+
+// Statistics
+typedef struct {
+    uint64_t uptime_ms;
+    uint32_t active_executions;
+    uint64_t messages_processed;
+    uint64_t messages_failed;
+    uint64_t messages_routed;
+    size_t queue_depth;
+    size_t cluster_size;
+} node_statistics_t;
+
+void node_state_get_statistics(const node_state_t *state, node_statistics_t *stats);
+
+#endif // ROOLE_NODE_STATE_H

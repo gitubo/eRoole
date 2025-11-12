@@ -14,9 +14,6 @@ bin/
 *.exe
 *.out
 
-# Binaries
-roole
-
 # Logs
 logs/
 *.log
