@@ -2,11 +2,13 @@
 // Unit tests for SWIM state machine WITHOUT network I/O
 
 #define _POSIX_C_SOURCE 200809L
+#define _BSD_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 #include "roole/gossip/gossip_protocol.h"
 #include "roole/cluster/cluster_view.h"
 

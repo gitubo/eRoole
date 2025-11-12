@@ -68,6 +68,7 @@ if(BUILD_GOSSIP)
         src/gossip/protocol/failure_detector.c
         src/gossip/protocol/message_handlers.c
         src/gossip/protocol/gossip_serialization.c
+        src/gossip/membership/update_queue.c
         src/gossip/engine/gossip_engine.c
     )
     target_link_libraries(roole_gossip roole_transport roole_cluster roole_core)

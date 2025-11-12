@@ -8,39 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_PENDING_ACKS 64
-
-typedef struct pending_ack {
-    node_id_t target_node;
-    uint64_t ping_sent_ms;
-    int active;
-} pending_ack_t;
-
-struct gossip_protocol {
-    node_id_t my_id;
-    node_type_t my_type;
-    char my_ip[MAX_IP_LEN];
-    uint16_t gossip_port;
-    uint16_t data_port;
-    uint64_t incarnation;
-    uint64_t sequence_num;
-    
-    gossip_config_t config;
-    cluster_view_t *cluster_view;
-    
-    pending_ack_t pending_acks[MAX_PENDING_ACKS];
-    
-    gossip_protocol_callbacks_t callbacks;
-    void *callback_context;
-    
-    gossip_protocol_stats_t stats;
-};
 
 // ============================================================================
 // PENDING ACK MANAGEMENT
 // ============================================================================
 
-static int add_pending_ack(gossip_protocol_t *proto, node_id_t target_node) {
+int add_pending_ack(gossip_protocol_t *proto, node_id_t target_node) {
     for (int i = 0; i < MAX_PENDING_ACKS; i++) {
         if (!proto->pending_acks[i].active) {
             proto->pending_acks[i].target_node = target_node;
@@ -53,7 +26,7 @@ static int add_pending_ack(gossip_protocol_t *proto, node_id_t target_node) {
     return -1;
 }
 
-static int remove_pending_ack(gossip_protocol_t *proto, node_id_t target_node) {
+int remove_pending_ack(gossip_protocol_t *proto, node_id_t target_node) {
     for (int i = 0; i < MAX_PENDING_ACKS; i++) {
         if (proto->pending_acks[i].active && 
             proto->pending_acks[i].target_node == target_node) {

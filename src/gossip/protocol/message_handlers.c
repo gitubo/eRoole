@@ -1,7 +1,6 @@
 #include "roole/gossip/gossip_protocol.h"
 #include "roole/core/common.h"
 
-typedef struct gossip_protocol gossip_protocol_t;
 
 // ============================================================================
 // MESSAGE HANDLERS (Pure state transitions)
@@ -44,6 +43,10 @@ static void handle_ping(gossip_protocol_t *proto,
                 proto->callbacks.on_member_alive(upd->node_id, upd, 
                                                 proto->callback_context);
             }
+
+            gossip_member_update_t propagate = *upd;
+            propagate.timestamp_ms = time_now_ms();
+            update_queue_push(engine->update_queue, &propagate);
         } else {
             // Handle rejoin (DEAD -> ALIVE with higher incarnation)
             if (existing->status == NODE_STATUS_DEAD && 

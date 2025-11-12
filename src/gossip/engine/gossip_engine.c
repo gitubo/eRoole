@@ -1,9 +1,7 @@
-// src/gossip/engine/gossip_engine.c
-// Refactored: Uses transport layer for I/O, protocol layer for state
-
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/gossip/gossip_engine.h"
+#include "roole/gossip/update_queue.h"
 #include "roole/transport/udp_transport.h"
 #include "roole/core/logger.h"
 #include <stdlib.h>
@@ -28,6 +26,8 @@ struct gossip_engine {
     
     member_event_cb event_callback;
     void *event_callback_data;
+
+    update_queue_t *update_queue;
     
     pthread_t protocol_thread;
     volatile int shutdown_flag;
@@ -267,7 +267,7 @@ gossip_engine_t* gossip_engine_create(
     engine->transport = udp_transport_create(bind_addr, gossip_port);
     if (!engine->transport) {
         LOG_ERROR("Failed to create UDP transport");
-        free(engine);
+        gossip_engine_shutdown(engine);
         return NULL;
     }
     
@@ -288,7 +288,14 @@ gossip_engine_t* gossip_engine_create(
     if (!engine->protocol) {
         LOG_ERROR("Failed to create gossip protocol");
         udp_transport_destroy(engine->transport);
-        free(engine);
+        gossip_engine_shutdown(engine);
+        return NULL;
+    }
+
+    engine->update_queue = update_queue_create();
+    if (!engine->update_queue) {
+        LOG_ERROR("Failed to create update queue");
+        gossip_engine_shutdown(engine);
         return NULL;
     }
     
@@ -374,6 +381,11 @@ void gossip_engine_shutdown(gossip_engine_t *engine)
     
     if (engine->transport) {
         udp_transport_destroy(engine->transport);
+    }
+
+    if (engine->update_queue) {
+        update_queue_destroy(engine->update_queue);
+        engine->update_queue = NULL;
     }
     
     free(engine);

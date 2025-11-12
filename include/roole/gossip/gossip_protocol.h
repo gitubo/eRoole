@@ -7,8 +7,6 @@
 #include "roole/gossip/gossip_types.h"
 #include "roole/cluster/cluster_view.h"
 
-typedef struct gossip_protocol gossip_protocol_t;
-
 // Protocol callbacks (invoked by state machine)
 typedef struct {
     // Membership changes
@@ -20,6 +18,44 @@ typedef struct {
     void (*on_send_message)(const gossip_message_t *msg, const char *dest_ip, 
                            uint16_t dest_port, void *ctx);
 } gossip_protocol_callbacks_t;
+
+typedef struct {
+    uint64_t pings_sent;
+    uint64_t acks_received;
+    uint64_t ack_timeouts;
+    uint64_t suspect_count;
+    uint64_t dead_count;
+    uint64_t updates_sent;
+    uint64_t updates_received;
+} gossip_protocol_stats_t;
+
+#define MAX_PENDING_ACKS 64
+
+typedef struct pending_ack {
+    node_id_t target_node;
+    uint64_t ping_sent_ms;
+    int active;
+} pending_ack_t;
+
+typedef struct {
+    node_id_t my_id;
+    node_type_t my_type;
+    char my_ip[MAX_IP_LEN];
+    uint16_t gossip_port;
+    uint16_t data_port;
+    uint64_t incarnation;
+    uint64_t sequence_num;
+    
+    gossip_config_t config;
+    cluster_view_t *cluster_view;
+    
+    pending_ack_t pending_acks[MAX_PENDING_ACKS];
+    
+    gossip_protocol_callbacks_t callbacks;
+    void *callback_context;
+    
+    gossip_protocol_stats_t stats;
+} gossip_protocol_t;
 
 /**
  * Create protocol instance
@@ -107,16 +143,6 @@ void gossip_protocol_add_seed(gossip_protocol_t *proto, const char *seed_ip, uin
  * @param proto Protocol handle
  * @param out_stats Output statistics
  */
-typedef struct {
-    uint64_t pings_sent;
-    uint64_t acks_received;
-    uint64_t ack_timeouts;
-    uint64_t suspect_count;
-    uint64_t dead_count;
-    uint64_t updates_sent;
-    uint64_t updates_received;
-} gossip_protocol_stats_t;
-
 void gossip_protocol_get_stats(gossip_protocol_t *proto, gossip_protocol_stats_t *out_stats);
 
 /**
@@ -124,5 +150,11 @@ void gossip_protocol_get_stats(gossip_protocol_t *proto, gossip_protocol_stats_t
  * @param proto Protocol handle
  */
 void gossip_protocol_destroy(gossip_protocol_t *proto);
+
+int add_pending_ack(gossip_protocol_t *proto, node_id_t target_node);
+
+int remove_pending_ack(gossip_protocol_t *proto, node_id_t target_node);
+
+
 
 #endif // ROOLE_GOSSIP_PROTOCOL_H
