@@ -1,0 +1,26 @@
+# config/prometheus.yaml - Prometheus scrape configuration
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'roole_production'
+    environment: 'prod'
+
+scrape_configs:
+  - job_name: 'roole'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets:
+          - 'roole:7002'
+          - 'roole:7102'
+          - 'roole:7202'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 'alertmanager:9093'
+
+rule_files:
+  - '/etc/prometheus/roole_alerts.yml'

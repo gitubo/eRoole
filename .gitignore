@@ -1,0 +1,33 @@
+# Docker files
+dockerfile
+Dockerfile
+*.crt
+
+# Build artifacts
+cmake/
+build/
+bin/
+*.o
+*.so
+*.a
+*.obj
+*.exe
+*.out
+
+# Binaries
+roole
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
