@@ -77,6 +77,7 @@ if(BUILD_RPC)
     add_library(roole_rpc STATIC
         src/rpc/core/rpc_channel.c
         src/rpc/core/rpc_serialization.c
+        src/rpc/core/handler_registry.c
         src/rpc/server/rpc_server.c
         src/rpc/client/rpc_client.c
     )
@@ -141,6 +142,24 @@ if(BUILD_TESTS AND TARGET roole_gossip)
     add_test(NAME test_failure_detector COMMAND test_failure_detector)
 endif()
 
+if(BUILD_TESTS AND TARGET roole_rpc)
+    enable_testing()
+
+    # Complete RPC integration test
+    add_executable(test_rpc_complete test/integration/test_rpc_complete.c)
+    target_link_libraries(test_rpc_complete roole_rpc roole_transport roole_core pthread)
+    add_test(NAME test_rpc_complete COMMAND test_rpc_complete)
+
+    # Unit test for RPC serialization
+    add_executable(test_rpc_serialization test/unit/rpc/test_rpc_serialization.c)
+    target_link_libraries(test_rpc_serialization roole_rpc)
+    add_test(NAME test_rpc_serialization COMMAND test_rpc_serialization)
+
+    # Unit test for handler registry
+    add_executable(test_rpc_handler test/unit/rpc/test_rpc_handler.c)
+    target_link_libraries(test_rpc_handler roole_rpc)
+    add_test(NAME test_rpc_handler COMMAND test_rpc_handler)
+endif()
 
 # ------------------------------------------------------------------
 # RIEPILOGO

@@ -15,6 +15,16 @@ typedef enum {
     RPC_CHANNEL_INGRESS = 2   // Client-facing (Router only)
 } rpc_channel_type_t;
 
+typedef struct rpc_channel {
+    int socket_fd;
+    rpc_channel_type_t channel_type;
+    uint8_t *rx_buffer;
+    size_t rx_buffer_size;
+    size_t rx_data_len;
+    uint8_t *tx_buffer;
+    size_t tx_buffer_size;
+} rpc_channel_t;
+
 /**
  * Initialize RPC channel
  * @param channel Channel structure to initialize
@@ -66,6 +76,13 @@ uint8_t* rpc_channel_get_tx_buffer(rpc_channel_t *channel);
  * @return Buffer size
  */
 size_t rpc_channel_get_rx_buffer_size(const rpc_channel_t *channel);
+
+/**
+ * Get transmit buffer size
+ * @param channel Channel handle
+ * @return Buffer size
+ */
+size_t rpc_channel_get_tx_buffer_size(const rpc_channel_t *channel);
 
 /**
  * Get current data length in RX buffer
