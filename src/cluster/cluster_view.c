@@ -59,7 +59,7 @@ int cluster_view_add(cluster_view_t *view, const cluster_member_t *member) {
                 // Rejoining node - update everything
                 view->members[i] = *member;
                 view->members[i].last_seen_ms = time_now_ms();
-                view->members[i].incarnation = member->incarnation + 1;
+                //view->members[i].incarnation = member->incarnation + 1;
                 pthread_rwlock_unlock(&view->lock);
                 LOG_INFO("Node %u rejoined cluster (was DEAD, now ALIVE, incarnation=%lu)", 
                          member->node_id, view->members[i].incarnation);
@@ -88,7 +88,12 @@ int cluster_view_add(cluster_view_t *view, const cluster_member_t *member) {
     }
     
     view->members[view->count] = *member;
-    view->members[view->count].last_seen_ms = time_now_ms();
+    if (member->status == NODE_STATUS_ALIVE) {
+        view->members[view->count].last_seen_ms = time_now_ms();
+    } else {
+        // Keep the timestamp from the member parameter (for testing or rejoins)
+        view->members[view->count].last_seen_ms = member->last_seen_ms;
+    }
     view->count++;
     
     pthread_rwlock_unlock(&view->lock);

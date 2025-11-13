@@ -43,10 +43,6 @@ static void handle_ping(gossip_protocol_t *proto,
                 proto->callbacks.on_member_alive(upd->node_id, upd, 
                                                 proto->callback_context);
             }
-
-            gossip_member_update_t propagate = *upd;
-            propagate.timestamp_ms = time_now_ms();
-            update_queue_push(engine->update_queue, &propagate);
         } else {
             // Handle rejoin (DEAD -> ALIVE with higher incarnation)
             if (existing->status == NODE_STATUS_DEAD && 
@@ -384,7 +380,12 @@ int gossip_protocol_handle_message(
         case GOSSIP_MSG_DEAD:
             handle_dead(proto, msg);
             break;
-            
+
+        case GOSSIP_MSG_JOIN:
+        case GOSSIP_MSG_LEAVE:
+            handle_ping(proto, msg, src_ip, src_port); 
+            break;
+        
         default:
             LOG_DEBUG("SWIM: Unhandled message type %u", msg->msg_type);
             break;

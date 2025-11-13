@@ -1,7 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/gossip/gossip_engine.h"
-#include "roole/gossip/update_queue.h"
 #include "roole/transport/udp_transport.h"
 #include "roole/core/logger.h"
 #include <stdlib.h>
@@ -27,8 +26,6 @@ struct gossip_engine {
     member_event_cb event_callback;
     void *event_callback_data;
 
-    update_queue_t *update_queue;
-    
     pthread_t protocol_thread;
     volatile int shutdown_flag;
 };
@@ -292,13 +289,6 @@ gossip_engine_t* gossip_engine_create(
         return NULL;
     }
 
-    engine->update_queue = update_queue_create();
-    if (!engine->update_queue) {
-        LOG_ERROR("Failed to create update queue");
-        gossip_engine_shutdown(engine);
-        return NULL;
-    }
-    
     LOG_INFO("Gossip engine created (node_id=%u, type=%d, port=%u)",
              my_id, my_type, gossip_port);
     
@@ -383,11 +373,6 @@ void gossip_engine_shutdown(gossip_engine_t *engine)
         udp_transport_destroy(engine->transport);
     }
 
-    if (engine->update_queue) {
-        update_queue_destroy(engine->update_queue);
-        engine->update_queue = NULL;
-    }
-    
     free(engine);
     
     LOG_INFO("Gossip engine shutdown complete");

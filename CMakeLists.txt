@@ -68,7 +68,6 @@ if(BUILD_GOSSIP)
         src/gossip/protocol/failure_detector.c
         src/gossip/protocol/message_handlers.c
         src/gossip/protocol/gossip_serialization.c
-        src/gossip/membership/update_queue.c
         src/gossip/engine/gossip_engine.c
     )
     target_link_libraries(roole_gossip roole_transport roole_cluster roole_core)
@@ -128,6 +127,18 @@ if(BUILD_TESTS AND TARGET roole_gossip)
     add_executable(test_swim_state test/unit/gossip/test_swim_state.c)
     target_link_libraries(test_swim_state roole_gossip)
     add_test(NAME test_swim_state COMMAND test_swim_state)
+
+    add_executable(test_gossip_serialization test/unit/gossip/test_gossip_serialization.c)
+    target_link_libraries(test_gossip_serialization roole_gossip)
+    add_test(NAME test_gossip_serialization COMMAND test_gossip_serialization)
+
+    add_executable(test_message_handlers test/unit/gossip/test_message_handlers.c)
+    target_link_libraries(test_message_handlers roole_gossip)
+    add_test(NAME test_message_handlers COMMAND test_message_handlers)
+
+    add_executable(test_failure_detector test/unit/gossip/test_failure_detector.c)
+    target_link_libraries(test_failure_detector roole_gossip)
+    add_test(NAME test_failure_detector COMMAND test_failure_detector)
 endif()
 
 
