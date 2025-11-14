@@ -2,7 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/core/event_bus.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>

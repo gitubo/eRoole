@@ -4,10 +4,10 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/core/metrics_server.h"
-#include "roole/core/metrics.h"
+#include "roole/metrics/metrics_server.h"
+#include "roole/metrics/metrics.h"
 #include "roole/core/common.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

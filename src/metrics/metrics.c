@@ -3,7 +3,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/core/metrics.h"
+#include "roole/metrics/metrics.h"
 #include "roole/core/common.h"
 #include <stdlib.h>
 #include <math.h>

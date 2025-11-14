@@ -5,6 +5,7 @@
 #define ROOLE_NODE_EXECUTION_TRACKER_H
 
 #include "roole/core/common.h"
+#include "roole/node/message_queue.h"
 #include <pthread.h>
 
 #define MAX_PENDING_EXECUTIONS 10000

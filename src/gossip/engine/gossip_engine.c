@@ -2,7 +2,7 @@
 
 #include "roole/gossip/gossip_engine.h"
 #include "roole/transport/udp_transport.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

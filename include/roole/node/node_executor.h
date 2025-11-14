@@ -1,6 +1,3 @@
-// include/roole/node/node_executor.h
-// Message executor (processes messages from queue)
-
 #ifndef ROOLE_NODE_EXECUTOR_H
 #define ROOLE_NODE_EXECUTOR_H
 
@@ -28,5 +25,15 @@ int node_start_executors(node_state_t *state, size_t num_threads);
  * @param state Node state
  */
 void node_stop_executors(node_state_t *state);
+
+/**
+ * Get executor statistics
+ * @param state Node state
+ * @param out_active_threads Output: number of executor threads
+ * @param out_active_executions Output: number of currently executing messages
+ */
+void node_executor_get_stats(node_state_t *state, 
+                             size_t *out_active_threads,
+                             uint32_t *out_active_executions);
 
 #endif // ROOLE_NODE_EXECUTOR_H

@@ -1,5 +1,5 @@
 #include "roole/cluster/cluster_view.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include "roole/core/common.h"
 #include <stdlib.h>
 

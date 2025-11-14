@@ -4,7 +4,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/cluster/membership.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include "roole/gossip/gossip_engine.h" 
 #include <stdlib.h>
 #include <unistd.h>

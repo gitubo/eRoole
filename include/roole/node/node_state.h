@@ -7,8 +7,8 @@
 #include "roole/core/common.h"
 #include "roole/core/config.h"
 #include "roole/dag/dag.h"
-#include "roole/core/metrics.h"
-#include "roole/core/metrics_server.h"
+#include "roole/metrics/metrics.h"
+#include "roole/metrics/metrics_server.h"
 #include "roole/core/event_bus.h"
 #include "roole/cluster/cluster_view.h"
 #include "roole/cluster/membership.h"
@@ -19,7 +19,7 @@
 #include <pthread.h>
 
 // Node identity (immutable after initialization)
-typedef struct {
+typedef struct node_identity {
     node_id_t node_id;
     node_type_t node_type;
     char cluster_name[64];

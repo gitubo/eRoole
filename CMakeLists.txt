@@ -17,10 +17,12 @@ include_directories(include)
 # ------------------------------------------------------------------
 option(BUILD_TRANSPORT           "Build solo roole_transport" ON)
 option(BUILD_CORE                "Build roole_core" ON)
+option(BUILD_LOGGER              "Build roole_logger" ON)
 option(BUILD_CLUSTER             "Build roole_cluster" ON)
 option(BUILD_GOSSIP              "Build roole_gossip" ON)
 option(BUILD_RPC                 "Build roole_rpc" ON)
 option(BUILD_DAG                 "Build roole_dag" ON)
+option(BUILD_METRICS             "Build roole_metrics" ON)
 option(BUILD_NODE                "Build roole_node" ON)
 option(BUILD_EXECUTABLES         "Build eseguibili" ON)
 option(BUILD_TESTS               "Build tutti i test" OFF)
@@ -28,19 +30,24 @@ option(BUILD_TESTS               "Build tutti i test" OFF)
 # ------------------------------------------------------------------
 # CORE LIBRARY
 # ------------------------------------------------------------------
+if(BUILD_LOGGER)
+    add_library(roole_logger STATIC
+        src/logger/logger.c
+    )
+    target_link_libraries(roole_logger pthread m)
+endif()
+
 if(BUILD_CORE)
     add_library(roole_core STATIC
         src/core/common.c
-        src/core/logger.c
         src/core/config.c
         src/core/config_validator.c
-        src/core/metrics.c
-        src/core/metrics_server.c
         src/core/event_bus.c
         src/core/service_registry.c
     )
-    target_link_libraries(roole_core pthread m)
+    target_link_libraries(roole_core roole_logger pthread m)
 endif()
+
 
 # ------------------------------------------------------------------
 # TRANSPORT LIBRARY
@@ -58,7 +65,10 @@ endif()
 # ALTRI LIBRARY (opzionali)
 # ------------------------------------------------------------------
 if(BUILD_CLUSTER)
-    add_library(roole_cluster STATIC src/cluster/cluster_view.c src/cluster/membership.c)
+    add_library(roole_cluster STATIC 
+        src/cluster/cluster_view.c 
+        src/cluster/membership.c
+    )
     target_link_libraries(roole_cluster roole_core)
 endif()
 
@@ -85,9 +95,21 @@ if(BUILD_RPC)
 endif()
 
 if(BUILD_DAG)
-    add_library(roole_dag STATIC src/dag/dag_catalog.c src/dag/dag_executor.c)
+    add_library(roole_dag STATIC 
+        src/dag/dag_catalog.c 
+        src/dag/dag_executor.c
+    )
     target_link_libraries(roole_dag roole_core)
 endif()
+
+if(BUILD_METRICS)
+    add_library(roole_metrics STATIC 
+        src/metrics/metrics.c 
+        src/metrics/metrics_server.c
+    )
+    target_link_libraries(roole_metrics)
+endif()
+
 
 if(BUILD_NODE)
     add_library(roole_node STATIC
@@ -95,7 +117,7 @@ if(BUILD_NODE)
         src/node/peers/peer_pool.c
         src/node/handlers/handler_registry.c
     )
-    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_dag roole_core PRIVATE pthread m)
+    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_dag roole_metrics roole_core PRIVATE pthread m)
 endif()
 
 # ------------------------------------------------------------------

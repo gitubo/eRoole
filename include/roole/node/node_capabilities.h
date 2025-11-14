@@ -7,6 +7,8 @@
 #include "roole/core/config.h"
 #include "roole/node/node_state.h"
 
+typedef struct node_identity node_identity_t;
+
 // Node capabilities
 typedef struct {
     int has_ingress;   // Accepts external client requests

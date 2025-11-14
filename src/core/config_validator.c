@@ -2,7 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/core/config_validator.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>

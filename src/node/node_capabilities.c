@@ -11,7 +11,7 @@
 // CAPABILITY DETECTION FROM CONFIG
 // ============================================================================
 
-void node_detect_capabilities_ex(const roole_config_t *config,
+void node_detect_capabilities(const roole_config_t *config,
                                  node_capabilities_t *caps,
                                  node_identity_t *identity) {
     if (!config || !caps || !identity) return;
@@ -54,7 +54,7 @@ void node_detect_capabilities_ex(const roole_config_t *config,
     }
 }
 
-void node_print_capabilities_ex(const node_capabilities_t *caps,
+void node_print_capabilities(const node_capabilities_t *caps,
                                 const node_identity_t *identity) {
     if (!caps || !identity) return;
     

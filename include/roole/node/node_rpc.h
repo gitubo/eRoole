@@ -1,6 +1,3 @@
-// include/roole/node/node_rpc.h
-// Node RPC server management
-
 #ifndef ROOLE_NODE_RPC_H
 #define ROOLE_NODE_RPC_H
 
@@ -10,9 +7,10 @@
 /**
  * Start RPC servers for node
  * Starts DATA server (always) and INGRESS server (if has_ingress capability)
- * Blocks until servers are stopped
+ * Creates handler registry based on node capabilities
+ * Runs servers in detached threads
  * @param state Node state
- * @return 0 on clean exit, error code on failure
+ * @return 0 on success, error code on failure
  */
 int node_start_rpc_servers(node_state_t *state);
 

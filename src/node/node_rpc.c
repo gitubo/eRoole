@@ -1,151 +1,149 @@
 // src/node/node_rpc.c
+// Simplified RPC server startup using handler registry
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/core/node_state.h"
-#include "roole/rpc/rpc.h"
+#include "roole/node/node_rpc.h"
+#include "roole/node/node_handlers.h"
+#include "roole/rpc/rpc_server.h"
 #include "roole/core/common.h"
-#include "roole/core/service_registry.h"
-#include <string.h>
-#include <stdlib.h>
-
+#include <pthread.h>
+#include <unistd.h>
 
 // ============================================================================
-// FORWARD DECLARATIONS (Handlers defined in separate files)
+// RPC SERVER THREADS
 // ============================================================================
 
-// Client-facing handlers (INGRESS channel)
-int handle_submit_message(rpc_async_context_t *context, 
-                          const uint8_t *in_data, size_t in_len);
-int handle_get_execution_status(rpc_async_context_t *context,
-                                const uint8_t *in_data, size_t in_len);
-int handle_list_dags(rpc_async_context_t *context,
-                     const uint8_t *in_data, size_t in_len);
-int handle_add_dag(rpc_async_context_t *context,
-                   const uint8_t *in_data, size_t in_len);
+typedef struct rpc_server_context {
+    node_state_t *state;
+    rpc_server_t *server;
+    const char *server_type;  // "DATA" or "INGRESS"
+} rpc_server_context_t;
 
-// Peer-to-peer handlers (DATA channel)
-int handle_process_message(rpc_async_context_t *context,
-                           const uint8_t *in_data, size_t in_len);
-int handle_execution_update(rpc_async_context_t *context,
-                            const uint8_t *in_data, size_t in_len);
-int handle_sync_catalog(rpc_async_context_t *context,
-                        const uint8_t *in_data, size_t in_len);
-
-
-// ============================================================================
-// DYNAMIC SERVICE TABLE BUILDER
-// ============================================================================
-
-rpc_service_entry_t* node_build_rpc_service_table_ex(const node_state_t *state) {
-    if (!state) return NULL;
+static void* rpc_server_thread_fn(void *arg) {
+    rpc_server_context_t *ctx = (rpc_server_context_t*)arg;
     
-    const node_capabilities_t *caps = node_state_get_capabilities(state);
+    logger_push_component("rpc");
+    LOG_INFO("%s RPC server thread started", ctx->server_type);
     
-    // Count handlers needed based on capabilities
-    size_t handler_count = 0;
+    // Run server (blocks until stopped)
+    rpc_server_run(ctx->server);
     
-    // INGRESS handlers (only if has_ingress capability)
-    if (caps->has_ingress) {
-        handler_count += 4;  // SUBMIT_MESSAGE, GET_STATUS, LIST_DAGS, ADD_DAG
-    }
+    LOG_INFO("%s RPC server thread stopped", ctx->server_type);
+    logger_pop_component();
     
-    // DATA handlers (always included for peer communication)
-    handler_count += 3;  // PROCESS_MESSAGE, EXECUTION_UPDATE, SYNC_CATALOG
-    
-    // Allocate service table (+1 for sentinel)
-    rpc_service_entry_t *table = calloc(handler_count + 1, sizeof(rpc_service_entry_t));
-    if (!table) {
-        LOG_ERROR("Failed to allocate RPC service table");
-        return NULL;
-    }
-    
-    size_t idx = 0;
-    
-    // INGRESS handlers (client-facing)
-    if (caps->has_ingress) {
-        table[idx++] = (rpc_service_entry_t){
-            FUNC_ID_SUBMIT_MESSAGE, handle_submit_message, 8192
-        };
-        table[idx++] = (rpc_service_entry_t){
-            FUNC_ID_GET_STATUS, handle_get_execution_status, 16
-        };
-        table[idx++] = (rpc_service_entry_t){
-            FUNC_ID_LIST_DAGS, handle_list_dags, 4096
-        };
-        table[idx++] = (rpc_service_entry_t){
-            FUNC_ID_ADD_DAG, handle_add_dag, 8192
-        };
-        LOG_DEBUG("Registered INGRESS handlers (client-facing)");
-    }
-    
-    // DATA handlers (peer-to-peer) - always included
-    table[idx++] = (rpc_service_entry_t){
-        FUNC_ID_PROCESS_MESSAGE, handle_process_message, 8192
-    };
-    table[idx++] = (rpc_service_entry_t){
-        FUNC_ID_EXECUTION_UPDATE, handle_execution_update, 16
-    };
-    table[idx++] = (rpc_service_entry_t){
-        FUNC_ID_SYNC_CATALOG, handle_sync_catalog, 8192
-    };
-    LOG_DEBUG("Registered DATA handlers (peer communication)");
-    
-    // Sentinel
-    table[idx] = (rpc_service_entry_t){0, NULL, 0};
-    
-    LOG_INFO("RPC service table built: %zu handlers (ingress=%d, data=always)",
-             handler_count, caps->has_ingress);
-    
-    return table;
-}
-
-void node_free_rpc_service_table(rpc_service_entry_t *table) {
-    if (table) {
-        free(table);
-    }
+    return NULL;
 }
 
 // ============================================================================
-// RPC SERVER STARTUP (Capability-driven)
+// PUBLIC API
 // ============================================================================
 
-int node_start_rpc_servers_ex(node_state_t *state, 
-                              rpc_service_entry_t *service_table) {
-    if (!state || !service_table) return RESULT_ERR_INVALID;
-    
-    // Get identity and capabilities
-    const node_identity_t *id = node_state_get_identity(state);
-    const node_capabilities_t *caps = node_state_get_capabilities(state);
-    
-    // Register in service registry
-    
-    service_registry_t *registry = service_registry_global();
-    if (registry) {
-        service_registry_register(registry, SERVICE_TYPE_NODE_STATE, 
-                                 "main", state);
-        service_registry_register(registry, SERVICE_TYPE_RPC_SERVER,
-                                 "service_table", service_table);
+int node_start_rpc_servers(node_state_t *state) {
+    if (!state) {
+        LOG_ERROR("Cannot start RPC servers: NULL state");
+        return -1;
     }
     
+    const node_identity_t *identity = node_state_get_identity(state);
+    const node_capabilities_t *caps = node_state_get_capabilities(state);
+    
+    // Build handler registry
+    rpc_handler_registry_t *registry = node_build_handler_registry(state);
+    if (!registry) {
+        LOG_ERROR("Failed to build handler registry");
+        return -1;
+    }
     
     LOG_INFO("========================================");
-    LOG_INFO("Starting RPC servers:");
-    LOG_INFO("  DATA channel: port %u (peer communication)", id->data_port);
+    LOG_INFO("Starting RPC Servers");
+    LOG_INFO("  Node: %u (%s)", identity->node_id, identity->cluster_name);
+    LOG_INFO("  DATA port: %u (always present)", identity->data_port);
     
     if (caps->has_ingress) {
-        LOG_INFO("  INGRESS channel: port %u (client requests)", id->ingress_port);
-        LOG_INFO("  Starting in ROUTER mode (DATA + INGRESS)");
-        LOG_INFO("========================================");
-        
-        // Start router mode (DATA + INGRESS)
-        return rpc_router_run(id->data_port, id->ingress_port, service_table);
+        LOG_INFO("  INGRESS port: %u (client-facing)", identity->ingress_port);
     } else {
-        LOG_INFO("  INGRESS channel: DISABLED (no ingress capability)");
-        LOG_INFO("  Starting in WORKER mode (DATA only)");
-        LOG_INFO("========================================");
-        
-        // Start worker mode (DATA only)
-        return rpc_worker_run(id->data_port, service_table);
+        LOG_INFO("  INGRESS: disabled");
     }
+    LOG_INFO("========================================");
+    
+    // Configure DATA server (always present)
+    rpc_server_config_t data_config = {
+        .port = identity->data_port,
+        .bind_addr = identity->bind_addr,
+        .channel_type = RPC_CHANNEL_DATA,
+        .max_connections = 512,
+        .buffer_size = 8192,
+        .recv_timeout_ms = 5000
+    };
+    
+    rpc_server_t *data_server = rpc_server_create(&data_config, registry);
+    if (!data_server) {
+        LOG_ERROR("Failed to create DATA RPC server");
+        rpc_handler_registry_destroy(registry);
+        return -1;
+    }
+    
+    LOG_INFO("DATA RPC server created successfully");
+    
+    // Start DATA server thread
+    pthread_t data_thread;
+    rpc_server_context_t data_ctx = {
+        .state = state,
+        .server = data_server,
+        .server_type = "DATA"
+    };
+    
+    if (pthread_create(&data_thread, NULL, rpc_server_thread_fn, &data_ctx) != 0) {
+        LOG_ERROR("Failed to create DATA server thread");
+        rpc_server_destroy(data_server);
+        rpc_handler_registry_destroy(registry);
+        return -1;
+    }
+    
+    pthread_detach(data_thread);
+    LOG_INFO("DATA RPC server thread started");
+    
+    // Configure INGRESS server (if has_ingress capability)
+    if (caps->has_ingress) {
+        rpc_server_config_t ingress_config = {
+            .port = identity->ingress_port,
+            .bind_addr = identity->bind_addr,
+            .channel_type = RPC_CHANNEL_INGRESS,
+            .max_connections = 1024,
+            .buffer_size = 8192,
+            .recv_timeout_ms = 10000
+        };
+        
+        rpc_server_t *ingress_server = rpc_server_create(&ingress_config, registry);
+        if (!ingress_server) {
+            LOG_ERROR("Failed to create INGRESS RPC server");
+            // DATA server already running, but continue
+        } else {
+            LOG_INFO("INGRESS RPC server created successfully");
+            
+            // Start INGRESS server thread
+            pthread_t ingress_thread;
+            rpc_server_context_t ingress_ctx = {
+                .state = state,
+                .server = ingress_server,
+                .server_type = "INGRESS"
+            };
+            
+            if (pthread_create(&ingress_thread, NULL, rpc_server_thread_fn, &ingress_ctx) != 0) {
+                LOG_ERROR("Failed to create INGRESS server thread");
+                rpc_server_destroy(ingress_server);
+            } else {
+                pthread_detach(ingress_thread);
+                LOG_INFO("INGRESS RPC server thread started");
+            }
+        }
+    }
+    
+    LOG_INFO("RPC servers startup complete");
+    
+    // Give servers time to bind and listen
+    sleep(1);
+    
+    return 0;
 }

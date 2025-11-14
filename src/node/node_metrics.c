@@ -5,7 +5,7 @@
 #include "roole/core/common.h"
 #include "roole/core/event_bus.h"
 #include "roole/core/service_registry.h"
-#include "roole/core/metrics.h"
+#include "roole/metrics/metrics.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -19,7 +19,7 @@ static void on_dag_catalog_changed(size_t new_count, void *user_data) {
     }
 }
 
-int node_metrics_init_ex(node_state_t *state, const char *metrics_addr) {
+int node_metrics_init(node_state_t *state, const char *metrics_addr) {
     if (!state) return RESULT_ERR_INVALID;
     
     // If no metrics address, skip metrics
@@ -210,7 +210,7 @@ int node_metrics_init_ex(node_state_t *state, const char *metrics_addr) {
     return RESULT_OK;
 }
 
-void node_metrics_shutdown_ex(node_state_t *state) {
+void node_metrics_shutdown(node_state_t *state) {
     if (!state) return;
     
     if (state->metrics_server) {
@@ -226,7 +226,7 @@ void node_metrics_shutdown_ex(node_state_t *state) {
     LOG_INFO("Metrics system shutdown complete");
 }
 
-void node_metrics_update_periodic_ex(node_state_t *state) {
+void node_metrics_update_periodic(node_state_t *state) {
     if (!state || !state->metrics_registry) return;
     
     // Get subsystems
@@ -252,7 +252,7 @@ void node_metrics_update_periodic_ex(node_state_t *state) {
     }
     
     // Update cluster metrics
-    node_metrics_update_cluster_ex(state);
+    node_metrics_update_cluster(state);
     
     // Update event bus metrics
     service_registry_t *registry = service_registry_global();
@@ -276,7 +276,7 @@ void node_metrics_update_periodic_ex(node_state_t *state) {
     }
 }
 
-void node_metrics_update_cluster_ex(node_state_t *state) {
+void node_metrics_update_cluster(node_state_t *state) {
     if (!state) return;
     
     cluster_view_t *view = node_state_get_cluster_view(state);

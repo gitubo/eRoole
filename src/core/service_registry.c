@@ -2,7 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/core/service_registry.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 

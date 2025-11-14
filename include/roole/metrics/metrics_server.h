@@ -1,7 +1,7 @@
 #ifndef ROOLE_METRICS_SERVER_H
 #define ROOLE_METRICS_SERVER_H
 
-#include "roole/core/metrics.h"
+#include "roole/metrics/metrics.h"
 #include <stdint.h>
 #include <pthread.h>
 

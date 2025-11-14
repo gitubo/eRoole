@@ -6,7 +6,7 @@
 #include "roole/rpc/rpc_handler.h"
 #include "roole/rpc/rpc_types.h"
 #include "roole/core/common.h"
-#include "roole/core/logger.h"
+#include "roole/logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
