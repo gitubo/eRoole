@@ -133,3 +133,54 @@ uint32_t hash_string(const char *str) {
     }
     return hash;
 }
+
+// ============================================================================
+// RESULT CHECKING AND LOGGING
+// ============================================================================
+
+// Check if result is successful
+int result_is_ok(const result_t *result) {
+    return result->code == RESULT_OK;
+}
+
+// Check if result is an error
+int result_is_error(const result_t *result) {
+    return result->code != RESULT_OK;
+}
+
+// Log error result
+void result_log_error(const result_t *result) {
+    if (result_is_error(result)) {
+        if (result->message[0] != '\0') {
+            LOG_ERROR("[%s:%d in %s()] Error %d: %s",
+                     result->source_file ? result->source_file : "unknown",
+                     result->source_line,
+                     result->function ? result->function : "unknown",
+                     result->code,
+                     result->message);
+        } else {
+            LOG_ERROR("[%s:%d in %s()] Error %d",
+                     result->source_file ? result->source_file : "unknown",
+                     result->source_line,
+                     result->function ? result->function : "unknown",
+                     result->code);
+        }
+    }
+}
+
+// Get error code from result (for compatibility with old code)
+int result_code(const result_t *result) {
+    return result->code;
+}
+
+// Convert old-style int return to result_t
+result_t result_from_int(int code) {
+    result_t result = {
+        .code = code,
+        .message = {0},
+        .source_file = NULL,
+        .source_line = 0,
+        .function = NULL
+    };
+    return result;
+}

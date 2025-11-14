@@ -77,6 +77,13 @@ uint32_t hash_u32(uint32_t x);
 uint64_t hash_u64(uint64_t x);
 uint32_t hash_string(const char *str);
 
+// Result Checking and Logging
+int result_is_ok(const result_t *result);
+int result_is_error(const result_t *result);
+void result_log_error(const result_t *result);
+int result_code(const result_t *result);
+result_t result_from_int(int code);
+
 // Macros
 #define ROOLE_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define ROOLE_MAX(a, b) ((a) > (b) ? (a) : (b))

@@ -160,6 +160,25 @@ int udp_transport_start_receiver(udp_transport_t *transport,
     return 0;
 }
 
+void udp_transport_stop_receiver(udp_transport_t *transport) {
+if (!transport) return;
+
+    udp_transport_impl_t *udp = (udp_transport_impl_t*)transport;
+
+    // 1. Set the shutdown flag to signal the receiver thread to exit its loop
+    udp->base.shutdown_flag = 1;
+
+    // 2. The existing code uses recvfrom with O_NONBLOCK, which means the thread 
+    //    will exit after a maximum of 10ms (usleep(10000)) once the flag is set.
+    //    We wait for the thread to terminate gracefully.
+    if (udp->receiver_thread) {
+        LOG_DEBUG("Stopping UDP receiver thread on %s:%u", udp->base.bind_addr, udp->base.port);
+        pthread_join(udp->receiver_thread, NULL);
+        udp->receiver_thread = 0; // Clear the thread handle
+        LOG_DEBUG("UDP receiver thread stopped");
+    }
+}
+
 void udp_transport_destroy(udp_transport_t *transport) {
     if (!transport) return;
     

@@ -74,7 +74,7 @@ if(BUILD_CLUSTER)
         src/cluster/cluster_view.c 
         src/cluster/membership.c
     )
-    target_link_libraries(roole_cluster roole_core)
+    target_link_libraries(roole_cluster roole_core roole_gossip)
 endif()
 
 if(BUILD_GOSSIP)
@@ -103,6 +103,8 @@ if(BUILD_DAG)
     add_library(roole_dag STATIC 
         src/dag/dag_catalog.c 
         src/dag/dag_executor.c
+        src/dag/dag_validator.c 
+        src/dag/dag_serialization.c
     )
     target_link_libraries(roole_dag roole_core)
 endif()
