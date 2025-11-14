@@ -143,6 +143,13 @@ if(BUILD_EXECUTABLES AND TARGET roole_node)
     add_executable(roole_node_bin src/node/node_main.c)
     target_link_libraries(roole_node_bin roole_node)
     set_target_properties(roole_node_bin PROPERTIES OUTPUT_NAME "roole-node")
+
+    # DAG registration tool
+    add_executable(dag_register test/tools/dag_register.c)
+    target_link_libraries(dag_register roole_node)
+    set_target_properties(dag_register PROPERTIES OUTPUT_NAME "dag-register")
+    
+    install(TARGETS dag_register DESTINATION bin)
 endif()
 
 # ------------------------------------------------------------------

@@ -7,6 +7,53 @@
 // MESSAGE HANDLERS (Pure state transitions)
 // ============================================================================
 
+// Add this helper function at the top of the file
+static void send_cluster_snapshot(gossip_protocol_t *proto,
+                                  const char *dest_ip,
+                                  uint16_t dest_port) {
+    gossip_message_t response = {
+        .version = 1,
+        .msg_type = GOSSIP_MSG_JOIN_RESPONSE,
+        .sender_id = proto->my_id,
+        .sequence_num = __sync_fetch_and_add(&proto->sequence_num, 1),
+        .num_updates = 0
+    };
+    
+    pthread_rwlock_rdlock(&proto->cluster_view->lock);
+    
+    // Pack all alive members into response
+    for (size_t i = 0; i < proto->cluster_view->count && 
+         response.num_updates < GOSSIP_MAX_PIGGYBACK_UPDATES; i++) {
+        
+        cluster_member_t *m = &proto->cluster_view->members[i];
+        
+        if (m->status == NODE_STATUS_DEAD) continue;
+        
+        gossip_member_update_t *upd = &response.updates[response.num_updates];
+        upd->node_id = m->node_id;
+        upd->node_type = m->node_type;
+        safe_strncpy(upd->ip_address, m->ip_address, MAX_IP_LEN);
+        upd->gossip_port = m->gossip_port;
+        upd->data_port = m->data_port;
+        upd->status = m->status;
+        upd->incarnation = m->incarnation;
+        upd->timestamp_ms = time_now_ms();
+        
+        response.num_updates++;
+    }
+    
+    pthread_rwlock_unlock(&proto->cluster_view->lock);
+    
+    LOG_INFO("SWIM: Sending cluster snapshot to %s:%u (%u members)",
+             dest_ip, dest_port, response.num_updates);
+    
+    if (proto->callbacks.on_send_message) {
+        proto->callbacks.on_send_message(&response, dest_ip, dest_port,
+                                        proto->callback_context);
+    }
+}
+
+// Modify handle_ping to detect JOIN messages
 static void handle_ping(gossip_protocol_t *proto,
                        const gossip_message_t *msg,
                        const char *src_ip,
@@ -15,7 +62,16 @@ static void handle_ping(gossip_protocol_t *proto,
     LOG_DEBUG("SWIM: Processing PING from node %u (updates=%u)", 
               msg->sender_id, msg->num_updates);
     
-    // Process piggyback updates
+    // Check if this is a JOIN message (sender not in cluster)
+    int is_new_member = 0;
+    cluster_member_t *existing = cluster_view_get(proto->cluster_view, msg->sender_id);
+    if (!existing) {
+        is_new_member = 1;
+    } else {
+        cluster_view_release(proto->cluster_view);
+    }
+    
+    // Process piggyback updates (existing code)...
     for (uint8_t i = 0; i < msg->num_updates; i++) {
         const gossip_member_update_t *upd = &msg->updates[i];
         
@@ -45,7 +101,7 @@ static void handle_ping(gossip_protocol_t *proto,
                                                 proto->callback_context);
             }
         } else {
-            // Handle rejoin (DEAD -> ALIVE with higher incarnation)
+            // Handle rejoin and status updates (existing code)...
             if (existing->status == NODE_STATUS_DEAD && 
                 upd->status == NODE_STATUS_ALIVE &&
                 upd->incarnation > existing->incarnation) {
@@ -81,7 +137,7 @@ static void handle_ping(gossip_protocol_t *proto,
                 
                 proto->stats.updates_received++;
                 
-                // Trigger appropriate callback
+                // Trigger appropriate callback (existing code)...
                 if (upd->status == NODE_STATUS_SUSPECT && old_status == NODE_STATUS_ALIVE) {
                     proto->stats.suspect_count++;
                     if (proto->callbacks.on_member_suspect) {
@@ -107,7 +163,13 @@ static void handle_ping(gossip_protocol_t *proto,
         }
     }
     
-    // Build ACK message (protocol decides what to send)
+    // If this was a JOIN from a new member, send full cluster snapshot
+    if (is_new_member) {
+        LOG_INFO("SWIM: New member %u joining, sending cluster snapshot", msg->sender_id);
+        send_cluster_snapshot(proto, src_ip, src_port);
+    }
+    
+    // Build ACK message (existing code)...
     gossip_message_t ack_msg = {
         .version = 1,
         .msg_type = GOSSIP_MSG_ACK,

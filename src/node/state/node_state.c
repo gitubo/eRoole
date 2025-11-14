@@ -396,7 +396,7 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
     for (size_t i = 0; i < config->router_count; i++) {
         char seed_ip[16];
         uint16_t seed_port;
-        parse_addr_port(config->routers[i], seed_ip, &seed_port);
+        config_parse_address(config->routers[i], seed_ip, &seed_port);
         
         LOG_INFO("Attempting to join via seed: %s:%u", seed_ip, seed_port);
         
@@ -414,21 +414,60 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
                            "Failed to join cluster via any seed router");
     }
     
-    // Wait for cluster view to populate (give gossip time to converge)
+    // Wait for cluster view to populate
     LOG_INFO("Waiting for cluster view to populate...");
-    for (int i = 0; i < 10; i++) {
+    
+    // Check initial state
+    size_t initial_count = state->cluster_view->count;
+    LOG_DEBUG("Initial cluster members: %zu", initial_count);
+    
+    // Wait up to 30 seconds for cluster view to stabilize
+    int max_attempts = 30;
+    int stable_count = 0;
+    size_t last_count = initial_count;
+    
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
         sleep(1);
         
-        size_t member_count = state->cluster_view->count;
-        if (member_count > 1) {  // Self + at least one other node
-            LOG_INFO("Cluster view populated with %zu members", member_count);
-            cluster_view_dump(state->cluster_view, "After Bootstrap");
-            return RESULT_SUCCESS();
+        size_t current_count = state->cluster_view->count;
+        
+        LOG_DEBUG("Bootstrap attempt %d: cluster has %zu members", 
+                  attempt + 1, current_count);
+        
+        // Check if we've discovered at least one other node (seed)
+        if (current_count > initial_count) {
+            LOG_INFO("Discovered seed node(s), cluster has %zu members", current_count);
+            
+            // Wait for view to stabilize (same count for 3 consecutive seconds)
+            if (current_count == last_count) {
+                stable_count++;
+                if (stable_count >= 3) {
+                    LOG_INFO("Cluster view stabilized with %zu members", current_count);
+                    cluster_view_dump(state->cluster_view, "After Bootstrap");
+                    return RESULT_SUCCESS();
+                }
+            } else {
+                stable_count = 0;
+            }
+            
+            last_count = current_count;
         }
     }
     
-    LOG_WARN("Cluster view not fully populated after 10s (may be normal for slow networks)");
-    return RESULT_SUCCESS();
+    // Timeout reached
+    size_t final_count = state->cluster_view->count;
+    
+    if (final_count > initial_count) {
+        LOG_WARN("Cluster view partially populated after 30s (%zu members, may grow)",
+                 final_count);
+        cluster_view_dump(state->cluster_view, "After Bootstrap (Partial)");
+        return RESULT_SUCCESS();
+    } else {
+        LOG_ERROR("Cluster view not populated after 30s (still %zu members)", 
+                  final_count);
+        return RESULT_ERROR(RESULT_ERR_TIMEOUT, 
+                           "Cluster membership discovery timed out");
+    }
 }
 
 void node_state_shutdown(node_state_t *state) {
