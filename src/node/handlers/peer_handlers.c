@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <endian.h>
 
 // ============================================================================
 // HANDLER: Process Message (from router to worker)

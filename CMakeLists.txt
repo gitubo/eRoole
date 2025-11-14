@@ -15,7 +15,7 @@ include_directories(include)
 # ------------------------------------------------------------------
 # OPZIONI DI BUILD
 # ------------------------------------------------------------------
-option(BUILD_TRANSPORT           "Build solo roole_transport" ON)
+option(BUILD_TRANSPORT           "Build roole_transport" ON)
 option(BUILD_CORE                "Build roole_core" ON)
 option(BUILD_LOGGER              "Build roole_logger" ON)
 option(BUILD_CLUSTER             "Build roole_cluster" ON)
@@ -24,8 +24,8 @@ option(BUILD_RPC                 "Build roole_rpc" ON)
 option(BUILD_DAG                 "Build roole_dag" ON)
 option(BUILD_METRICS             "Build roole_metrics" ON)
 option(BUILD_NODE                "Build roole_node" ON)
-option(BUILD_EXECUTABLES         "Build eseguibili" ON)
-option(BUILD_TESTS               "Build tutti i test" OFF)
+option(BUILD_EXECUTABLES         "Build executables" ON)
+option(BUILD_TESTS               "Build tests" ON)
 
 # ------------------------------------------------------------------
 # CORE LIBRARY
@@ -121,14 +121,23 @@ if(BUILD_NODE)
         src/node/state/node_state.c
         src/node/peers/peer_pool.c
         src/node/handlers/handler_registry.c
+        src/node/handlers/client_handlers.c
+        src/node/handlers/peer_handlers.c
+        src/node/execution/execution_tracker.c
+        src/node/execution/message_queue.c
+        src/node/execution/node_executor.c
+        src/node/node_capabilities.c
+        src/node/node_metrics.c
+        src/node/node_rpc.c
+
     )
-    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_dag roole_metrics roole_core PRIVATE pthread m)
+    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_dag roole_metrics roole_core roole_config PRIVATE pthread m)
 endif()
 
 # ------------------------------------------------------------------
 # ESEGUIBILI (opzionali)
 # ------------------------------------------------------------------
-if(BUILD_EXECUTABLES AND BUILD_NODE)
+if(BUILD_EXECUTABLES AND TARGET roole_node)
     add_executable(roole_node_bin src/node/node_main.c)
     target_link_libraries(roole_node_bin roole_node)
     set_target_properties(roole_node_bin PROPERTIES OUTPUT_NAME "roole-node")

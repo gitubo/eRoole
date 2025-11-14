@@ -2,7 +2,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/node/node.h"
+#include "roole/node/node_state.h"
 #include "roole/core/common.h"
 #include <stdlib.h>
 #include <string.h>

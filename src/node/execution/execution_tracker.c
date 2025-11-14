@@ -5,6 +5,7 @@
 
 #include "roole/node/execution_tracker.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 

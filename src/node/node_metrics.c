@@ -226,55 +226,6 @@ void node_metrics_shutdown(node_state_t *state) {
     LOG_INFO("Metrics system shutdown complete");
 }
 
-void node_metrics_update_periodic(node_state_t *state) {
-    if (!state || !state->metrics_registry) return;
-    
-    // Get subsystems
-    message_queue_t *queue = node_state_get_message_queue(state);
-    cluster_view_t *view = node_state_get_cluster_view(state);
-    
-    // Update uptime
-    if (state->metric_uptime_seconds) {
-        uint64_t uptime_seconds = (time_now_ms() - state->start_time_ms) / 1000;
-        metrics_gauge_set(state->metric_uptime_seconds, (double)uptime_seconds);
-    }
-    
-    // Update queue size
-    if (state->metric_queue_size && queue) {
-        size_t queue_size = message_queue_size(queue);
-        metrics_gauge_set(state->metric_queue_size, (double)queue_size);
-    }
-    
-    // Update active executions
-    if (state->metric_active_executions) {
-        metrics_gauge_set(state->metric_active_executions, 
-                         (double)state->active_executions);
-    }
-    
-    // Update cluster metrics
-    node_metrics_update_cluster(state);
-    
-    // Update event bus metrics
-    service_registry_t *registry = service_registry_global();
-    if (registry) {
-        event_bus_t *event_bus = (event_bus_t*)service_registry_get(registry,
-                                                                     SERVICE_TYPE_EVENT_BUS,
-                                                                     "main");
-        if (event_bus) {
-            event_bus_stats_t stats;
-            event_bus_get_stats(event_bus, &stats);
-            
-            static uint64_t last_log = 0;
-            uint64_t now = time_now_ms();
-            if (now - last_log > 60000) {  // Every 60 seconds
-                LOG_INFO("Event bus stats: published=%lu dispatched=%lu dropped=%lu queue=%lu subs=%lu",
-                        stats.events_published, stats.events_dispatched, 
-                        stats.events_dropped, stats.queue_size, stats.subscribers_total);
-                last_log = now;
-            }
-        }
-    }
-}
 
 void node_metrics_update_cluster(node_state_t *state) {
     if (!state) return;
@@ -321,5 +272,55 @@ void node_metrics_update_cluster(node_state_t *state) {
     }
     if (state->metric_cluster_members_dead) {
         metrics_gauge_set(state->metric_cluster_members_dead, (double)dead);
+    }
+}
+
+void node_metrics_update_periodic(node_state_t *state) {
+    if (!state || !state->metrics_registry) return;
+    
+    // Get subsystems
+    message_queue_t *queue = node_state_get_message_queue(state);
+    //cluster_view_t *view = node_state_get_cluster_view(state);
+    
+    // Update uptime
+    if (state->metric_uptime_seconds) {
+        uint64_t uptime_seconds = (time_now_ms() - state->start_time_ms) / 1000;
+        metrics_gauge_set(state->metric_uptime_seconds, (double)uptime_seconds);
+    }
+    
+    // Update queue size
+    if (state->metric_queue_size && queue) {
+        size_t queue_size = message_queue_size(queue);
+        metrics_gauge_set(state->metric_queue_size, (double)queue_size);
+    }
+    
+    // Update active executions
+    if (state->metric_active_executions) {
+        metrics_gauge_set(state->metric_active_executions, 
+                         (double)state->active_executions);
+    }
+    
+    // Update cluster metrics
+    node_metrics_update_cluster(state);
+    
+    // Update event bus metrics
+    service_registry_t *registry = service_registry_global();
+    if (registry) {
+        event_bus_t *event_bus = (event_bus_t*)service_registry_get(registry,
+                                                                     SERVICE_TYPE_EVENT_BUS,
+                                                                     "main");
+        if (event_bus) {
+            event_bus_stats_t stats;
+            event_bus_get_stats(event_bus, &stats);
+            
+            static uint64_t last_log = 0;
+            uint64_t now = time_now_ms();
+            if (now - last_log > 60000) {  // Every 60 seconds
+                LOG_INFO("Event bus stats: published=%lu dispatched=%lu dropped=%lu queue=%lu subs=%lu",
+                        stats.events_published, stats.events_dispatched, 
+                        stats.events_dropped, stats.queue_size, stats.subscribers_total);
+                last_log = now;
+            }
+        }
     }
 }

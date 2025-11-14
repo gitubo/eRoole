@@ -23,17 +23,17 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr);
 void node_metrics_shutdown(node_state_t *state);
 
 /**
- * Update periodic metrics
- * Called by metrics update thread
- * @param state Node state
- */
-void node_metrics_update_periodic(node_state_t *state);
-
-/**
  * Update cluster metrics
  * Updates cluster member counts
  * @param state Node state
  */
 void node_metrics_update_cluster(node_state_t *state);
+
+/**
+ * Update periodic metrics
+ * Called by metrics update thread
+ * @param state Node state
+ */
+void node_metrics_update_periodic(node_state_t *state);
 
 #endif // ROOLE_NODE_METRICS_H
