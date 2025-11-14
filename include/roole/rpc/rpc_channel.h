@@ -7,8 +7,6 @@
 #include "roole/rpc/rpc_types.h"
 #include <stddef.h>
 
-typedef struct rpc_channel rpc_channel_t;
-
 // Channel type
 typedef enum {
     RPC_CHANNEL_DATA = 1,     // Peer-to-peer communication
@@ -16,14 +14,19 @@ typedef enum {
 } rpc_channel_type_t;
 
 typedef struct rpc_channel {
-    int socket_fd;
-    rpc_channel_type_t channel_type;
+    int fd;
+    rpc_channel_type_t type;
+    
     uint8_t *rx_buffer;
     size_t rx_buffer_size;
     size_t rx_data_len;
+    
     uint8_t *tx_buffer;
     size_t tx_buffer_size;
-} rpc_channel_t;
+    
+    volatile int is_open;
+    pthread_mutex_t lock;
+}rpc_channel_t;
 
 /**
  * Initialize RPC channel

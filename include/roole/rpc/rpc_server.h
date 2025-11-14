@@ -5,6 +5,7 @@
 #define ROOLE_RPC_SERVER_H
 
 #include "roole/rpc/rpc_handler.h"
+#include "roole/rpc/rpc_channel.h"
 #include <stdint.h>
 
 typedef struct rpc_server rpc_server_t;

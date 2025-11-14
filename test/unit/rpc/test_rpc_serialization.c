@@ -1,11 +1,10 @@
-// test/unit/rpc/test_rpc_serialization.c
-// Unit tests for RPC message serialization
-
 #include "roole/rpc/rpc_types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <arpa/inet.h>
+
 
 void test_pack_unpack_request(void) {
     printf("Test: Pack/Unpack Request... ");
@@ -144,14 +143,18 @@ void test_large_payload(void) {
 void test_invalid_header(void) {
     printf("Test: Invalid Header Detection... ");
     
-    uint8_t buffer[RPC_HEADER_SIZE] = {0};
+    uint8_t buffer[RPC_HEADER_SIZE];
+    memset(buffer, 0, RPC_HEADER_SIZE);
     
-    // Set invalid total_len (less than header size)
-    uint32_t invalid_len = 5;
+    // Set invalid total_len (less than header size) in network byte order
+    uint32_t invalid_len = htonl(5);
     memcpy(buffer, &invalid_len, 4);
     
     rpc_header_t header;
-    assert(rpc_unpack_header(buffer, &header) < 0);
+    int result = rpc_unpack_header(buffer, &header);
+    
+    // Should fail validation
+    assert(result < 0);
     
     printf("✓\n");
 }
