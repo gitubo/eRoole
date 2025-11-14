@@ -6,6 +6,7 @@
 
 #include "roole/rpc/rpc_types.h"
 #include <stddef.h>
+#include <pthread.h>
 
 // Channel type
 typedef enum {

@@ -2,6 +2,7 @@
 
 #include "roole/gossip/gossip_types.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <string.h>
 #include <arpa/inet.h>
 #include <endian.h>

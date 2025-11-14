@@ -1,8 +1,6 @@
-// src/rpc/core/rpc_channel.c
-// RPC channel implementation with buffer management
-
 #include "roole/rpc/rpc_channel.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

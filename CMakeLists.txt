@@ -34,31 +34,36 @@ if(BUILD_LOGGER)
     add_library(roole_logger STATIC
         src/logger/logger.c
     )
-    target_link_libraries(roole_logger pthread m)
+    target_link_libraries(roole_logger)
 endif()
 
 if(BUILD_CORE)
     add_library(roole_core STATIC
         src/core/common.c
-        src/core/config.c
-        src/core/config_validator.c
         src/core/event_bus.c
         src/core/service_registry.c
     )
     target_link_libraries(roole_core roole_logger pthread m)
 endif()
 
+if(BUILD_CONFIG)
+    add_library(roole_config STATIC
+        src/config/config.c
+        src/config/config_validator.c
+    )
+    target_link_libraries(roole_config roole_core roole_logger)
+endif()
 
 # ------------------------------------------------------------------
 # TRANSPORT LIBRARY
 # ------------------------------------------------------------------
-if(BUILD_TRANSPORT)  # dipende da roole_core
+if(BUILD_TRANSPORT)
     add_library(roole_transport STATIC
         src/transport/transport_base.c
         src/transport/udp_transport.c
         src/transport/tcp_transport.c
     )
-    target_link_libraries(roole_transport roole_core)
+    target_link_libraries(roole_transport roole_core roole_logger)
 endif()
 
 # ------------------------------------------------------------------

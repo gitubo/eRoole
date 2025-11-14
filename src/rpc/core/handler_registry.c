@@ -3,6 +3,7 @@
 
 #include "roole/rpc/rpc_handler.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>

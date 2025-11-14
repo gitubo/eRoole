@@ -3,6 +3,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -34,44 +35,6 @@ double time_diff_us(const struct timespec *start, const struct timespec *end) {
 void timespec_now(struct timespec *ts) {
     clock_gettime(CLOCK_MONOTONIC, ts);
 }
-
-// ============================================================================
-// LOGGING
-// ============================================================================
-/*
-static log_level_t g_log_level = LOG_LEVEL_INFO;
-
-void log_set_level(log_level_t level) {
-    g_log_level = level;
-}
-
-void std_log(log_level_t level, const char *file, int line, 
-               const char *fmt, ...) {
-    if (level < g_log_level) return;
-    
-    const char *level_str;
-    switch (level) {
-        case LOG_LEVEL_DEBUG: level_str = "DEBUG"; break;
-        case LOG_LEVEL_INFO:  level_str = "INFO "; break;
-        case LOG_LEVEL_WARN:  level_str = "WARN "; break;
-        case LOG_LEVEL_ERROR: level_str = "ERROR"; break;
-        default: level_str = "?????"; break;
-    }
-    
-    uint64_t now_ms = time_now_ms();
-    
-    FILE *out = (level >= LOG_LEVEL_ERROR) ? stderr : stdout;
-    fprintf(out, "[%lu][%s][%s:%d] ", now_ms, level_str, file, line);
-    
-    va_list args;
-    va_start(args, fmt);
-    vfprintf(out, fmt, args);
-    va_end(args);
-    
-    fprintf(out, "\n");
-    fflush(out);
-}
-*/
 
 // ============================================================================
 // MEMORY UTILITIES

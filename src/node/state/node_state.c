@@ -7,7 +7,7 @@
 #include "roole/node/node_capabilities.h"
 #include "roole/node/node_executor.h"
 #include "roole/node/node_metrics.h"
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/core/service_registry.h"
 #include "roole/core/common.h"
 #include <stdlib.h>

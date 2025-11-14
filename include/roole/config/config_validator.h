@@ -2,7 +2,7 @@
 #ifndef ROOLE_CONFIG_VALIDATOR_H
 #define ROOLE_CONFIG_VALIDATOR_H
 
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/core/common.h"
 
 // ============================================================================

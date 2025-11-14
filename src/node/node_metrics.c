@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/node/node_state.h"
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/core/common.h"
 #include "roole/core/event_bus.h"
 #include "roole/core/service_registry.h"

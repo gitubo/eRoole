@@ -3,7 +3,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/core/common.h"
 #include <stdio.h>
 #include <stdlib.h>

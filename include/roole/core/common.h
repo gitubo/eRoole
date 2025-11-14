@@ -11,7 +11,6 @@
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
-#include "roole/logger/logger.h"
 
 // Error codes (backward compatible)
 typedef enum {

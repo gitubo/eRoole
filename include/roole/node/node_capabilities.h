@@ -4,7 +4,7 @@
 #ifndef ROOLE_NODE_CAPABILITIES_H
 #define ROOLE_NODE_CAPABILITIES_H
 
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/node/node_state.h"
 
 typedef struct node_identity node_identity_t;

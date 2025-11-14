@@ -1,5 +1,6 @@
 #include "roole/gossip/gossip_protocol.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 
 
 // ============================================================================

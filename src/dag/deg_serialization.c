@@ -1,7 +1,6 @@
-// TODO: Move from dag_catalog.c
 #include "roole/dag/dag.h"
 #include "roole/core/common.h"
-
+#include "roole/logger/logger.h"
 
 // ============================================================================
 // DAG SERIALIZATION (Stub implementation)

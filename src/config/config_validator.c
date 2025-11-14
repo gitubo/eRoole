@@ -1,7 +1,7 @@
 // src/core/config_validator.c
 #define _POSIX_C_SOURCE 200809L
 
-#include "roole/core/config_validator.h"
+#include "roole/config/config_validator.h"
 #include "roole/logger/logger.h"
 #include <stdio.h>
 #include <string.h>

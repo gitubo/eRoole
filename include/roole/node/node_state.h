@@ -5,7 +5,7 @@
 #define ROOLE_NODE_STATE_H
 
 #include "roole/core/common.h"
-#include "roole/core/config.h"
+#include "roole/config/config.h"
 #include "roole/dag/dag.h"
 #include "roole/metrics/metrics.h"
 #include "roole/metrics/metrics_server.h"

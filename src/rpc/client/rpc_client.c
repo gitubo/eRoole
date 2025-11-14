@@ -5,6 +5,7 @@
 #include "roole/rpc/rpc_channel.h"
 #include "roole/rpc/rpc_types.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>

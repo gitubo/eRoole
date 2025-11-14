@@ -4,6 +4,7 @@
 #define ROOLE_CONFIG_H
 
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include "roole/cluster/cluster_view.h"
 
 #define MAX_CONFIG_ROUTERS 16
