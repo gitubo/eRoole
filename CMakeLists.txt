@@ -122,10 +122,6 @@ if(BUILD_NODE)
         src/node/peers/peer_pool.c
         src/node/handlers/handler_registry.c
         src/node/handlers/datastore_handlers.c
-#        src/node/handlers/peer_handlers.c
-#        src/node/execution/execution_tracker.c
-#        src/node/execution/message_queue.c
-#        src/node/execution/node_executor.c
         src/node/node_capabilities.c
         src/node/node_metrics.c
         src/node/node_rpc.c
@@ -143,11 +139,11 @@ if(BUILD_EXECUTABLES AND TARGET roole_node)
     set_target_properties(roole_node_bin PROPERTIES OUTPUT_NAME "roole-node")
 
     # Datastore client tool
-#     add_executable(datastore_client test/tools/datastore_client.c)
-#    target_link_libraries(datastore_client roole_rpc roole_core roole_logger)
-#    set_target_properties(datastore_client PROPERTIES OUTPUT_NAME "datastore-client")
+    add_executable(datastore_client test/tools/datastore_client.c)
+    target_link_libraries(datastore_client roole_rpc roole_core roole_logger)
+    set_target_properties(datastore_client PROPERTIES OUTPUT_NAME "datastore-client")
     
-#    install(TARGETS roole_node_bin datastore_client DESTINATION bin)
+    install(TARGETS roole_node_bin datastore_client DESTINATION bin)
 endif()
 
 # ------------------------------------------------------------------
@@ -175,14 +171,6 @@ if(BUILD_TESTS AND TARGET roole_gossip)
     add_executable(test_gossip_serialization test/unit/gossip/test_gossip_serialization.c)
     target_link_libraries(test_gossip_serialization roole_gossip)
     add_test(NAME test_gossip_serialization COMMAND test_gossip_serialization)
-
-#    add_executable(test_message_handlers test/unit/gossip/test_message_handlers.c)
-#    target_link_libraries(test_message_handlers roole_gossip)
-#    add_test(NAME test_message_handlers COMMAND test_message_handlers)
-
-#    add_executable(test_failure_detector test/unit/gossip/test_failure_detector.c)
-#    target_link_libraries(test_failure_detector roole_gossip)
-#    add_test(NAME test_failure_detector COMMAND test_failure_detector)
 endif()
 
 if(BUILD_TESTS AND TARGET roole_rpc)
@@ -198,10 +186,6 @@ if(BUILD_TESTS AND TARGET roole_rpc)
     target_link_libraries(test_rpc_serialization roole_rpc)
     add_test(NAME test_rpc_serialization COMMAND test_rpc_serialization)
 
-    # Unit test for handler registry
-#    add_executable(test_rpc_handler test/unit/rpc/test_rpc_handler.c)
-#    target_link_libraries(test_rpc_handler roole_rpc)
-#    add_test(NAME test_rpc_handler COMMAND test_rpc_handler)
 endif()
 
 # ------------------------------------------------------------------

@@ -1,6 +1,6 @@
 #!/bin/bash
-# test/scripts/cli.sh - Interactive CLI for Roole Manual Testing
-# Updated for refactored architecture
+# test/scripts/cli.sh - Interactive CLI for Roole Distributed Datastore
+# Aligned with pure datastore architecture (no DAG/RAG execution)
 
 set -e
 
@@ -15,8 +15,6 @@ LOGS_DIR="$PROJECT_ROOT/logs"
 
 # Executables
 ROOLE_NODE="$BUILD_DIR/bin/roole-node"
-ROOLE_CLIENT="$BUILD_DIR/bin/roole-client"
-ROOLE_DAG_REGISTER="$BUILD_DIR/bin/roole-dag-register"
 
 # Configurations
 ROUTER_CONFIG="$CONFIG_DIR/router.ini"
@@ -27,22 +25,23 @@ ROUTER_LOG="$LOGS_DIR/router.log"
 WORKER_LOG="$LOGS_DIR/worker.log"
 
 # Default settings
-ROUTER_EXECUTOR_THREADS=2
-WORKER_EXECUTOR_THREADS=4
 METRICS_PORT=7002
-CLIENT_HOST="127.0.0.1"
-CLIENT_PORT=8081
+INGRESS_HOST="127.0.0.1"
+INGRESS_PORT=8081
 
-# Test data
-TEST_DAG_ID="1"
-TEST_DAG_NAME="test_dag"
-TEST_DAG_NODES="3"
+# RPC Protocol Constants (matching rpc_types.h)
+FUNC_ID_DATASTORE_SET=0x30
+FUNC_ID_DATASTORE_GET=0x31
+FUNC_ID_DATASTORE_UNSET=0x32
+FUNC_ID_DATASTORE_LIST=0x33
 
 # --- Colors for output ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
 # --- Helper Functions ---
@@ -68,6 +67,10 @@ print_warning() {
 
 print_info() {
     echo -e "${BLUE}ℹ${NC} $1"
+}
+
+print_data() {
+    echo -e "${CYAN}→${NC} $1"
 }
 
 # Check if build exists
@@ -133,6 +136,28 @@ get_pid() {
     pgrep -f "roole-node.*$config_file" 2>/dev/null | head -1
 }
 
+# --- RPC Helper Functions ---
+
+# Convert string to hex bytes for RPC payload
+string_to_hex() {
+    local str="$1"
+    echo -n "$str" | xxd -p | tr -d '\n'
+}
+
+# Pack RPC message (simplified - for demonstration)
+# In production, you'd use a proper RPC client binary
+send_rpc_request() {
+    local func_id=$1
+    local payload_hex=$2
+    
+    print_warning "RPC client not yet implemented"
+    print_info "To send requests, implement a C client using rpc_client.h"
+    print_info "Function ID: 0x$(printf '%02x' $func_id)"
+    print_info "Payload: $payload_hex"
+    
+    return 1
+}
+
 # --- Command Functions ---
 
 # 🚀 Start the router node
@@ -150,17 +175,18 @@ start_router() {
         return 1
     fi
     
-    print_info "Starting router with $ROUTER_EXECUTOR_THREADS executor threads"
+    print_info "Starting router (ingress-capable node)"
     print_info "Log: $ROUTER_LOG"
     
     # Start router in background
-    "$ROOLE_NODE" "$ROUTER_CONFIG" $ROUTER_EXECUTOR_THREADS > "$ROUTER_LOG" 2>&1 &
+    "$ROOLE_NODE" "$ROUTER_CONFIG" > "$ROUTER_LOG" 2>&1 &
     local pid=$!
     
     sleep 3
     
     if check_process "router.ini"; then
         print_success "Router started (PID: $(get_pid 'router.ini'))"
+        print_info "Ingress endpoint: $INGRESS_HOST:$INGRESS_PORT"
         print_info "View logs: tail -f $ROUTER_LOG"
         return 0
     else
@@ -184,11 +210,11 @@ start_worker() {
         return 1
     fi
     
-    print_info "Starting worker with $WORKER_EXECUTOR_THREADS executor threads"
+    print_info "Starting worker (peer-to-peer only)"
     print_info "Log: $WORKER_LOG"
     
     # Start worker in background
-    "$ROOLE_NODE" "$WORKER_CONFIG" $WORKER_EXECUTOR_THREADS > "$WORKER_LOG" 2>&1 &
+    "$ROOLE_NODE" "$WORKER_CONFIG" > "$WORKER_LOG" 2>&1 &
     local pid=$!
     
     sleep 3
@@ -232,15 +258,17 @@ check_cluster() {
     # Parse cluster metrics
     local total=$(echo "$metrics" | grep "cluster_members_total{" | grep -v "^#" | awk '{print $2}' | head -1)
     local active=$(echo "$metrics" | grep "cluster_members_active{" | grep -v "^#" | awk '{print $2}' | head -1)
+    local records=$(echo "$metrics" | grep "datastore_records{" | grep -v "^#" | awk '{print $2}' | head -1)
     
     if [ -z "$total" ]; then
         print_warning "Cluster metrics not yet available"
         return 1
     fi
     
-    print_info "Cluster Members:"
-    echo "  Total: $total"
-    echo "  Active: $active"
+    print_info "Cluster Status:"
+    echo "  Total Members: $total"
+    echo "  Active Members: $active"
+    echo "  Datastore Records: ${records:-0}"
     
     if [ "$active" = "2" ] || [ "$active" -ge "2" ]; then
         print_success "Cluster formed successfully ($active active members)"
@@ -252,65 +280,181 @@ check_cluster() {
     fi
 }
 
-# 📝 Register test DAG
-register_dag() {
-    print_header "Registering Test DAG"
+# 📝 Set a record in the datastore
+datastore_set() {
+    print_header "Set Datastore Record"
     
     if ! check_process "router.ini"; then
         print_error "Router is not running"
         return 1
     fi
     
-    if [ ! -f "$ROOLE_DAG_REGISTER" ]; then
-        print_error "roole-dag-register not found: $ROOLE_DAG_REGISTER"
-        print_info "This tool needs to be implemented"
+    echo ""
+    read -p "Enter key: " key
+    read -p "Enter value: " value
+    
+    if [ -z "$key" ] || [ -z "$value" ]; then
+        print_error "Key and value cannot be empty"
         return 1
     fi
     
-    print_info "Registering DAG '$TEST_DAG_NAME' (ID: $TEST_DAG_ID, nodes: $TEST_DAG_NODES)"
+    print_info "Setting record: key='$key', value='$value'"
     
-    if "$ROOLE_DAG_REGISTER" "$CLIENT_HOST" "$CLIENT_PORT" \
-       "$TEST_DAG_ID" "$TEST_DAG_NAME" "$TEST_DAG_NODES"; then
-        print_success "DAG registered successfully"
-        return 0
-    else
-        print_error "DAG registration failed"
-        return 1
-    fi
+    # Note: This requires implementing a proper RPC client
+    # For now, show what needs to be sent
+    print_warning "RPC Client Implementation Required"
+    echo ""
+    print_info "To implement SET operation:"
+    echo "  1. Create RPC client using rpc_client.h"
+    echo "  2. Connect to $INGRESS_HOST:$INGRESS_PORT"
+    echo "  3. Send RPC request:"
+    echo "     - Function ID: 0x30 (FUNC_ID_DATASTORE_SET)"
+    echo "     - Payload format: [key_len:2][key][value_len:4][value]"
+    echo "  4. Receive response: [ack:1][version:8]"
+    echo ""
+    print_info "Example C code:"
+    echo "  rpc_client_t *client = rpc_client_connect(\"$INGRESS_HOST\", $INGRESS_PORT, RPC_CHANNEL_INGRESS, 8192);"
+    echo "  // Pack request with key and value"
+    echo "  rpc_client_call(client, FUNC_ID_DATASTORE_SET, request, request_len, &response, &response_len, 5000);"
+    echo ""
+    
+    return 1
 }
 
-# ✉️ Send test message
-send_message() {
-    print_header "Sending Test Message"
+# 🔍 Get a record from the datastore
+datastore_get() {
+    print_header "Get Datastore Record"
     
     if ! check_process "router.ini"; then
         print_error "Router is not running"
         return 1
     fi
     
-    if [ ! -f "$ROOLE_CLIENT" ]; then
-        print_error "roole-client not found: $ROOLE_CLIENT"
-        print_info "This tool needs to be implemented"
+    echo ""
+    read -p "Enter key: " key
+    
+    if [ -z "$key" ]; then
+        print_error "Key cannot be empty"
         return 1
     fi
     
-    read -p "Enter message to send (default: 'Hello from CLI test!'): " message
-    message="${message:-Hello from CLI test!}"
+    print_info "Getting record: key='$key'"
     
-    print_info "Sending message: \"$message\""
+    print_warning "RPC Client Implementation Required"
+    echo ""
+    print_info "To implement GET operation:"
+    echo "  1. Create RPC client using rpc_client.h"
+    echo "  2. Connect to $INGRESS_HOST:$INGRESS_PORT"
+    echo "  3. Send RPC request:"
+    echo "     - Function ID: 0x31 (FUNC_ID_DATASTORE_GET)"
+    echo "     - Payload format: [key_len:2][key]"
+    echo "  4. Receive response: [found:1][value_len:4][value][version:8]"
+    echo ""
     
-    if "$ROOLE_CLIENT" "$CLIENT_HOST" "$CLIENT_PORT" "$message"; then
-        print_success "Message sent successfully"
+    return 1
+}
+
+# 🗑️ Unset (delete) a record from the datastore
+datastore_unset() {
+    print_header "Unset Datastore Record"
+    
+    if ! check_process "router.ini"; then
+        print_error "Router is not running"
+        return 1
+    fi
+    
+    echo ""
+    read -p "Enter key to delete: " key
+    
+    if [ -z "$key" ]; then
+        print_error "Key cannot be empty"
+        return 1
+    fi
+    
+    read -p "Are you sure you want to delete '$key'? (y/N): " confirm
+    
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        print_info "Deletion cancelled"
         return 0
-    else
-        print_error "Failed to send message"
+    fi
+    
+    print_info "Deleting record: key='$key'"
+    
+    print_warning "RPC Client Implementation Required"
+    echo ""
+    print_info "To implement UNSET operation:"
+    echo "  1. Create RPC client using rpc_client.h"
+    echo "  2. Connect to $INGRESS_HOST:$INGRESS_PORT"
+    echo "  3. Send RPC request:"
+    echo "     - Function ID: 0x32 (FUNC_ID_DATASTORE_UNSET)"
+    echo "     - Payload format: [key_len:2][key]"
+    echo "  4. Receive response: [ack:1]"
+    echo ""
+    
+    return 1
+}
+
+# 📋 List all keys in the datastore
+datastore_list() {
+    print_header "List Datastore Keys"
+    
+    if ! check_process "router.ini"; then
+        print_error "Router is not running"
         return 1
     fi
+    
+    print_info "Listing all keys..."
+    
+    print_warning "RPC Client Implementation Required"
+    echo ""
+    print_info "To implement LIST operation:"
+    echo "  1. Create RPC client using rpc_client.h"
+    echo "  2. Connect to $INGRESS_HOST:$INGRESS_PORT"
+    echo "  3. Send RPC request:"
+    echo "     - Function ID: 0x33 (FUNC_ID_DATASTORE_LIST)"
+    echo "     - Payload: empty (or optional prefix filter)"
+    echo "  4. Receive response: [count:4][key1_len:2][key1]...[keyN_len:2][keyN]"
+    echo ""
+    
+    return 1
+}
+
+# 🧪 Run interactive datastore test
+datastore_test() {
+    print_header "Interactive Datastore Test"
+    
+    if ! check_process "router.ini"; then
+        print_error "Router is not running"
+        return 1
+    fi
+    
+    print_info "This test demonstrates typical datastore operations"
+    echo ""
+    
+    print_info "Test sequence:"
+    echo "  1. SET key1 = 'Hello, Roole!'"
+    echo "  2. SET key2 = 'Distributed KV Store'"
+    echo "  3. GET key1"
+    echo "  4. LIST all keys"
+    echo "  5. UNSET key1"
+    echo "  6. LIST all keys (verify deletion)"
+    echo ""
+    
+    read -p "Press Enter to start test (or Ctrl+C to cancel)..."
+    
+    print_warning "Implementation Required: Create test_datastore_client.c"
+    print_info "This client should:"
+    echo "  - Connect to router ingress port"
+    echo "  - Execute the test sequence above"
+    echo "  - Print results for each operation"
+    echo "  - Verify eventual consistency across cluster"
+    
+    return 0
 }
 
 # 🔍 Show current status
 show_status() {
-    print_header "Current Roole Status"
+    print_header "Current Roole Datastore Status"
     
     # Check processes
     echo "Processes:"
@@ -331,8 +475,31 @@ show_status() {
     echo ""
     
     # Check cluster status (non-blocking)
-    if check_process "router.ini"; then
-        check_cluster || true
+    if check_process "router.ini" && command -v curl &> /dev/null; then
+        local metrics_url="http://localhost:$METRICS_PORT/metrics"
+        local metrics=$(curl -s "$metrics_url" 2>/dev/null || echo "")
+        
+        if [ -n "$metrics" ]; then
+            local total=$(echo "$metrics" | grep "cluster_members_total{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local active=$(echo "$metrics" | grep "cluster_members_active{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local records=$(echo "$metrics" | grep "datastore_records{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local bytes=$(echo "$metrics" | grep "datastore_bytes_total{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local sets=$(echo "$metrics" | grep "datastore_sets_total{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local gets=$(echo "$metrics" | grep "datastore_gets_total{" | grep -v "^#" | awk '{print $2}' | head -1)
+            local unsets=$(echo "$metrics" | grep "datastore_unsets_total{" | grep -v "^#" | awk '{print $2}' | head -1)
+            
+            echo "Cluster:"
+            echo "  Members (total): ${total:-0}"
+            echo "  Members (active): ${active:-0}"
+            echo ""
+            echo "Datastore:"
+            echo "  Records: ${records:-0}"
+            echo "  Total Bytes: ${bytes:-0}"
+            echo "  Operations:"
+            echo "    SETs: ${sets:-0}"
+            echo "    GETs: ${gets:-0}"
+            echo "    UNSETs: ${unsets:-0}"
+        fi
     fi
     
     echo ""
@@ -345,6 +512,7 @@ show_status() {
     fi
     
     if [ -f "$WORKER_LOG" ]; then
+        echo ""
         echo "  Worker (last 5 lines):"
         tail -5 "$WORKER_LOG" | sed 's/^/    /'
     fi
@@ -369,10 +537,22 @@ show_metrics() {
     print_info "Fetching metrics from $metrics_url"
     echo ""
     
-    curl -s "$metrics_url" | grep -v "^#" | head -30
+    local metrics=$(curl -s "$metrics_url")
     
+    # Filter and display relevant metrics
+    echo "=== Cluster Metrics ==="
+    echo "$metrics" | grep "cluster_members" | grep -v "^#"
     echo ""
-    print_info "View all metrics: curl $metrics_url"
+    
+    echo "=== Datastore Metrics ==="
+    echo "$metrics" | grep "datastore" | grep -v "^#"
+    echo ""
+    
+    echo "=== System Metrics ==="
+    echo "$metrics" | grep "uptime_seconds" | grep -v "^#"
+    echo ""
+    
+    print_info "Full metrics: curl $metrics_url | less"
 }
 
 # 📁 View logs
@@ -414,66 +594,188 @@ view_logs() {
     esac
 }
 
+# 🔧 Show implementation guide
+show_implementation_guide() {
+    print_header "RPC Client Implementation Guide"
+    
+    echo ""
+    print_info "To interact with the datastore, implement a C client:"
+    echo ""
+    
+    echo "1. Create src/tools/datastore_client.c:"
+    echo ""
+    cat << 'EOF'
+#include "roole/rpc/rpc_client.h"
+#include "roole/rpc/rpc_types.h"
+#include <stdio.h>
+#include <string.h>
+#include <arpa/inet.h>
+
+int main(int argc, char **argv) {
+    if (argc < 4) {
+        fprintf(stderr, "Usage: %s <host> <port> <operation> [args]\n", argv[0]);
+        fprintf(stderr, "Operations: set <key> <value> | get <key> | unset <key> | list\n");
+        return 1;
+    }
+    
+    const char *host = argv[1];
+    uint16_t port = atoi(argv[2]);
+    const char *op = argv[3];
+    
+    // Connect to ingress
+    rpc_client_t *client = rpc_client_connect(host, port, RPC_CHANNEL_INGRESS, 8192);
+    if (!client) {
+        fprintf(stderr, "Failed to connect to %s:%u\n", host, port);
+        return 1;
+    }
+    
+    if (strcmp(op, "set") == 0 && argc == 6) {
+        // SET operation
+        const char *key = argv[4];
+        const char *value = argv[5];
+        
+        // Pack request: [key_len:2][key][value_len:4][value]
+        uint8_t request[4096];
+        uint8_t *ptr = request;
+        
+        uint16_t key_len = strlen(key);
+        uint16_t key_len_net = htons(key_len);
+        memcpy(ptr, &key_len_net, 2); ptr += 2;
+        memcpy(ptr, key, key_len); ptr += key_len;
+        
+        uint32_t value_len = strlen(value);
+        uint32_t value_len_net = htonl(value_len);
+        memcpy(ptr, &value_len_net, 4); ptr += 4;
+        memcpy(ptr, value, value_len); ptr += value_len;
+        
+        size_t request_len = ptr - request;
+        
+        // Send request
+        uint8_t *response = NULL;
+        size_t response_len = 0;
+        
+        int status = rpc_client_call(client, FUNC_ID_DATASTORE_SET, 
+                                     request, request_len,
+                                     &response, &response_len, 5000);
+        
+        if (status == RPC_STATUS_SUCCESS) {
+            printf("✓ Record set successfully\n");
+            if (response_len >= 9) {
+                uint64_t version;
+                memcpy(&version, response + 1, 8);
+                version = be64toh(version);
+                printf("Version: %lu\n", version);
+            }
+        } else {
+            fprintf(stderr, "✗ SET failed with status: %d\n", status);
+        }
+        
+        free(response);
+    }
+    // ... implement GET, UNSET, LIST similarly ...
+    
+    rpc_client_close(client);
+    return 0;
+}
+EOF
+    echo ""
+    
+    echo "2. Add to CMakeLists.txt:"
+    echo "   add_executable(datastore-client src/tools/datastore_client.c)"
+    echo "   target_link_libraries(datastore-client roole-rpc roole-core)"
+    echo ""
+    
+    echo "3. Build and use:"
+    echo "   cd build && make"
+    echo "   ./bin/datastore-client 127.0.0.1 8081 set mykey myvalue"
+    echo "   ./bin/datastore-client 127.0.0.1 8081 get mykey"
+    echo "   ./bin/datastore-client 127.0.0.1 8081 list"
+    echo "   ./bin/datastore-client 127.0.0.1 8081 unset mykey"
+    echo ""
+}
+
 # --- Menu Logic ---
 
 MENU_OPTIONS=(
-    "Start Router"
-    "Start Worker"
-    "Start All & Check Cluster"
-    "Check Cluster Status"
-    "Register Test DAG"
-    "Send Test Message"
-    "Show Status"
-    "Show Metrics"
-    "View Logs"
-    "Stop All Nodes"
-    "Exit"
+    "🚀 Start Router"
+    "🏭 Start Worker"
+    "🌐 Start All & Check Cluster"
+    "🔗 Check Cluster Status"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    "📝 Set Record (Datastore)"
+    "🔍 Get Record (Datastore)"
+    "🗑️  Unset Record (Datastore)"
+    "📋 List All Keys"
+    "🧪 Run Datastore Test"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    "📊 Show Status"
+    "📈 Show Metrics"
+    "📁 View Logs"
+    "🔧 Implementation Guide"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    "🛑 Stop All Nodes"
+    "🚪 Exit"
 )
 
 menu_loop() {
-    PS3=$'\nSelect action: '
+    PS3=$'\n'"${CYAN}Select action:${NC} "
     
     select opt in "${MENU_OPTIONS[@]}"
     do
         echo ""
         case $opt in
-            "Start Router")
+            *"Start Router")
                 start_router
                 ;;
-            "Start Worker")
+            *"Start Worker")
                 start_worker
                 ;;
-            "Start All & Check Cluster")
+            *"Start All & Check Cluster")
                 start_router && \
                 start_worker && \
                 check_cluster
                 ;;
-            "Check Cluster Status")
+            *"Check Cluster Status")
                 check_cluster
                 ;;
-            "Register Test DAG")
-                register_dag
+            *"Set Record"*)
+                datastore_set
                 ;;
-            "Send Test Message")
-                send_message
+            *"Get Record"*)
+                datastore_get
                 ;;
-            "Show Status")
+            *"Unset Record"*)
+                datastore_unset
+                ;;
+            *"List All Keys")
+                datastore_list
+                ;;
+            *"Run Datastore Test")
+                datastore_test
+                ;;
+            *"Show Status")
                 show_status
                 ;;
-            "Show Metrics")
+            *"Show Metrics")
                 show_metrics
                 ;;
-            "View Logs")
+            *"View Logs")
                 view_logs
                 ;;
-            "Stop All Nodes")
+            *"Implementation Guide")
+                show_implementation_guide
+                ;;
+            *"Stop All Nodes")
                 cleanup
                 ;;
-            "Exit")
+            *"Exit")
                 echo ""
                 print_info "Exiting Roole CLI"
                 cleanup
                 exit 0
+                ;;
+            "━"*)
+                # Separator - do nothing
                 ;;
             *)
                 print_error "Invalid option: $REPLY"
@@ -489,7 +791,14 @@ menu_loop() {
 trap cleanup EXIT INT TERM
 
 # Initial checks
-print_header "Roole Interactive Testing CLI"
+clear
+echo ""
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║   ROOLE DISTRIBUTED DATASTORE - Interactive CLI       ║"
+echo "║   Pure Key-Value Storage with Gossip & Replication    ║"
+echo "╚════════════════════════════════════════════════════════╝"
+echo ""
+
 print_info "Project root: $PROJECT_ROOT"
 
 if ! check_build; then
@@ -500,7 +809,10 @@ setup_directories
 
 print_success "Ready to start"
 echo ""
-print_info "Tip: Use 'Start All & Check Cluster' for quick setup"
+print_warning "Note: RPC client implementation required for datastore operations"
+print_info "Select 'Implementation Guide' for details"
+echo ""
+print_info "Quick Start: Select 'Start All & Check Cluster'"
 echo ""
 
 # Start interactive loop
