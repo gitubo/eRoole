@@ -5,7 +5,7 @@
 
 /**
  * Executor thread function
- * Pops messages from queue, executes DAGs, updates status
+ * Pops messages from queue, updates status
  * @param arg Node state pointer
  * @return NULL
  */

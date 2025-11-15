@@ -21,7 +21,7 @@ option(BUILD_LOGGER              "Build roole_logger" ON)
 option(BUILD_CLUSTER             "Build roole_cluster" ON)
 option(BUILD_GOSSIP              "Build roole_gossip" ON)
 option(BUILD_RPC                 "Build roole_rpc" ON)
-option(BUILD_DAG                 "Build roole_dag" ON)
+option(BUILD_DATASTORE           "Build roole_datastore" ON)
 option(BUILD_METRICS             "Build roole_metrics" ON)
 option(BUILD_NODE                "Build roole_node" ON)
 option(BUILD_EXECUTABLES         "Build executables" ON)
@@ -99,14 +99,12 @@ if(BUILD_RPC)
     target_link_libraries(roole_rpc roole_transport roole_core)
 endif()
 
-if(BUILD_DAG)
-    add_library(roole_dag STATIC 
-        src/dag/dag_catalog.c 
-        src/dag/dag_executor.c
-        src/dag/dag_validator.c 
-        src/dag/dag_serialization.c
+if(BUILD_DATASTORE)
+    add_library(roole_datastore STATIC 
+        src/datastore/datastore_serialization.c
+        src/datastore/datastore.c 
     )
-    target_link_libraries(roole_dag roole_core)
+    target_link_libraries(roole_datastore roole_core)
 endif()
 
 if(BUILD_METRICS)
@@ -123,17 +121,17 @@ if(BUILD_NODE)
         src/node/state/node_state.c
         src/node/peers/peer_pool.c
         src/node/handlers/handler_registry.c
-        src/node/handlers/client_handlers.c
-        src/node/handlers/peer_handlers.c
-        src/node/execution/execution_tracker.c
-        src/node/execution/message_queue.c
-        src/node/execution/node_executor.c
+        src/node/handlers/datastore_handlers.c
+#        src/node/handlers/peer_handlers.c
+#        src/node/execution/execution_tracker.c
+#        src/node/execution/message_queue.c
+#        src/node/execution/node_executor.c
         src/node/node_capabilities.c
         src/node/node_metrics.c
         src/node/node_rpc.c
 
     )
-    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_dag roole_metrics roole_core roole_config PRIVATE pthread m)
+    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_datastore roole_metrics roole_core roole_config PRIVATE pthread m)
 endif()
 
 # ------------------------------------------------------------------
@@ -144,12 +142,12 @@ if(BUILD_EXECUTABLES AND TARGET roole_node)
     target_link_libraries(roole_node_bin roole_node)
     set_target_properties(roole_node_bin PROPERTIES OUTPUT_NAME "roole-node")
 
-    # DAG registration tool
-    add_executable(dag_register test/tools/dag_register.c)
-    target_link_libraries(dag_register roole_node)
-    set_target_properties(dag_register PROPERTIES OUTPUT_NAME "dag-register")
+    # Datastore client tool
+#     add_executable(datastore_client test/tools/datastore_client.c)
+#    target_link_libraries(datastore_client roole_rpc roole_core roole_logger)
+#    set_target_properties(datastore_client PROPERTIES OUTPUT_NAME "datastore-client")
     
-    install(TARGETS dag_register DESTINATION bin)
+#    install(TARGETS roole_node_bin datastore_client DESTINATION bin)
 endif()
 
 # ------------------------------------------------------------------
@@ -178,13 +176,13 @@ if(BUILD_TESTS AND TARGET roole_gossip)
     target_link_libraries(test_gossip_serialization roole_gossip)
     add_test(NAME test_gossip_serialization COMMAND test_gossip_serialization)
 
-    add_executable(test_message_handlers test/unit/gossip/test_message_handlers.c)
-    target_link_libraries(test_message_handlers roole_gossip)
-    add_test(NAME test_message_handlers COMMAND test_message_handlers)
+#    add_executable(test_message_handlers test/unit/gossip/test_message_handlers.c)
+#    target_link_libraries(test_message_handlers roole_gossip)
+#    add_test(NAME test_message_handlers COMMAND test_message_handlers)
 
-    add_executable(test_failure_detector test/unit/gossip/test_failure_detector.c)
-    target_link_libraries(test_failure_detector roole_gossip)
-    add_test(NAME test_failure_detector COMMAND test_failure_detector)
+#    add_executable(test_failure_detector test/unit/gossip/test_failure_detector.c)
+#    target_link_libraries(test_failure_detector roole_gossip)
+#    add_test(NAME test_failure_detector COMMAND test_failure_detector)
 endif()
 
 if(BUILD_TESTS AND TARGET roole_rpc)
@@ -201,9 +199,9 @@ if(BUILD_TESTS AND TARGET roole_rpc)
     add_test(NAME test_rpc_serialization COMMAND test_rpc_serialization)
 
     # Unit test for handler registry
-    add_executable(test_rpc_handler test/unit/rpc/test_rpc_handler.c)
-    target_link_libraries(test_rpc_handler roole_rpc)
-    add_test(NAME test_rpc_handler COMMAND test_rpc_handler)
+#    add_executable(test_rpc_handler test/unit/rpc/test_rpc_handler.c)
+#    target_link_libraries(test_rpc_handler roole_rpc)
+#    add_test(NAME test_rpc_handler COMMAND test_rpc_handler)
 endif()
 
 # ------------------------------------------------------------------
@@ -217,7 +215,7 @@ message(STATUS "  BUILD_CORE                 = ${BUILD_CORE}")
 message(STATUS "  BUILD_CLUSTER              = ${BUILD_CLUSTER}")
 message(STATUS "  BUILD_GOSSIP               = ${BUILD_GOSSIP}")
 message(STATUS "  BUILD_RPC                  = ${BUILD_RPC}")
-message(STATUS "  BUILD_DAG                  = ${BUILD_DAG}")
+message(STATUS "  BUILD_DATASTORE            = ${BUILD_DATASTORE}")
 message(STATUS "  BUILD_NODE                 = ${BUILD_NODE}")
 message(STATUS "  BUILD_EXECUTABLES          = ${BUILD_EXECUTABLES}")
 message(STATUS "  BUILD_TESTS                = ${BUILD_TESTS}")

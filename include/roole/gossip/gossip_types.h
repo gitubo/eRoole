@@ -67,6 +67,9 @@ typedef struct {
     uint8_t msg_type;              // gossip_msg_type_t
     uint16_t flags;                // Reserved
     node_id_t sender_id;           // Who sent this
+    node_type_t sender_type;     
+    uint16_t sender_gossip_port; 
+    uint16_t sender_data_port;   
     uint64_t sequence_num;         // Sender's sequence number
     uint8_t num_updates;           // Number of piggybacked updates
     gossip_member_update_t updates[GOSSIP_MAX_PIGGYBACK_UPDATES];

@@ -216,7 +216,7 @@ static const char* service_type_to_string(service_type_t type) {
         case SERVICE_TYPE_RPC_SERVER: return "RPC_SERVER";
         case SERVICE_TYPE_EVENT_BUS: return "EVENT_BUS";
         case SERVICE_TYPE_METRICS: return "METRICS";
-        case SERVICE_TYPE_DAG_CATALOG: return "DAG_CATALOG";
+        case SERVICE_TYPE_DATASTORE: return "DATASTORE";
         case SERVICE_TYPE_CLUSTER_VIEW: return "CLUSTER_VIEW";
         case SERVICE_TYPE_PEER_POOL: return "PEER_POOL";
         case SERVICE_TYPE_EXECUTOR_POOL: return "EXECUTOR_POOL";

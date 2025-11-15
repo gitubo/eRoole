@@ -1,3 +1,6 @@
+// src/node/handlers/handler_registry.c
+// Simplified handler registry - Datastore operations only
+
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/node/node_handlers.h"
@@ -7,7 +10,7 @@
 #include "roole/core/common.h"
 
 // ============================================================================
-// BUILD HANDLER REGISTRY
+// BUILD HANDLER REGISTRY (SIMPLIFIED)
 // ============================================================================
 
 rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
@@ -18,8 +21,8 @@ rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
     
     const node_capabilities_t *caps = node_state_get_capabilities(state);
     
-    LOG_INFO("Building RPC handler registry (has_ingress=%d, can_execute=%d, can_route=%d)",
-             caps->has_ingress, caps->can_execute, caps->can_route);
+    LOG_INFO("Building RPC handler registry (has_ingress=%d)",
+             caps->has_ingress);
     
     // Create registry
     rpc_handler_registry_t *registry = rpc_handler_registry_create();
@@ -33,37 +36,37 @@ rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
     // ========================================================================
     
     if (caps->has_ingress) {
-        LOG_INFO("Registering INGRESS handlers (client-facing)");
+        LOG_INFO("Registering INGRESS handlers (client-facing datastore ops)");
         
-        if (rpc_handler_register(registry, FUNC_ID_SUBMIT_MESSAGE,
-                                handle_submit_message, state) != 0) {
-            LOG_ERROR("Failed to register SUBMIT_MESSAGE handler");
+        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_SET,
+                                handle_datastore_set, state) != 0) {
+            LOG_ERROR("Failed to register DATASTORE_SET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_GET_STATUS,
-                                handle_get_execution_status, state) != 0) {
-            LOG_ERROR("Failed to register GET_STATUS handler");
+        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_GET,
+                                handle_datastore_get, state) != 0) {
+            LOG_ERROR("Failed to register DATASTORE_GET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_LIST_DAGS,
-                                handle_list_dags, state) != 0) {
-            LOG_ERROR("Failed to register LIST_DAGS handler");
+        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_UNSET,
+                                handle_datastore_unset, state) != 0) {
+            LOG_ERROR("Failed to register DATASTORE_UNSET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_ADD_DAG,
-                                handle_add_dag, state) != 0) {
-            LOG_ERROR("Failed to register ADD_DAG handler");
+        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_LIST,
+                                handle_datastore_list_keys, state) != 0) {
+            LOG_ERROR("Failed to register DATASTORE_LIST handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        LOG_INFO("Registered 4 INGRESS handlers");
+        LOG_INFO("Registered 4 INGRESS handlers (SET, GET, UNSET, LIST)");
     } else {
         LOG_INFO("Skipping INGRESS handlers (no ingress capability)");
     }
@@ -72,36 +75,22 @@ rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
     // Register DATA handlers (peer-to-peer, always present)
     // ========================================================================
     
-    LOG_INFO("Registering DATA handlers (peer-to-peer)");
+    LOG_INFO("Registering DATA handlers (peer-to-peer datastore sync)");
     
-    if (rpc_handler_register(registry, FUNC_ID_PROCESS_MESSAGE,
-                            handle_process_message, state) != 0) {
-        LOG_ERROR("Failed to register PROCESS_MESSAGE handler");
+    if (rpc_handler_register(registry, FUNC_ID_DATASTORE_SYNC,
+                            handle_datastore_sync, state) != 0) {
+        LOG_ERROR("Failed to register DATASTORE_SYNC handler");
         rpc_handler_registry_destroy(registry);
         return NULL;
     }
     
-    if (rpc_handler_register(registry, FUNC_ID_EXECUTION_UPDATE,
-                            handle_execution_update, state) != 0) {
-        LOG_ERROR("Failed to register EXECUTION_UPDATE handler");
-        rpc_handler_registry_destroy(registry);
-        return NULL;
-    }
-    
-    if (rpc_handler_register(registry, FUNC_ID_SYNC_CATALOG,
-                            handle_sync_catalog, state) != 0) {
-        LOG_ERROR("Failed to register SYNC_CATALOG handler");
-        rpc_handler_registry_destroy(registry);
-        return NULL;
-    }
-    
-    LOG_INFO("Registered 3 DATA handlers");
+    LOG_INFO("Registered 1 DATA handler (SYNC)");
     
     // ========================================================================
     // Summary
     // ========================================================================
     
-    size_t total_handlers = caps->has_ingress ? 7 : 3;
+    size_t total_handlers = caps->has_ingress ? 5 : 1;
     LOG_INFO("Handler registry built successfully: %zu total handlers", total_handlers);
     
     return registry;

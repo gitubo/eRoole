@@ -65,8 +65,42 @@ static void handle_ping(gossip_protocol_t *proto,
     // Check if this is a JOIN message (sender not in cluster)
     int is_new_member = 0;
     cluster_member_t *existing = cluster_view_get(proto->cluster_view, msg->sender_id);
+    
     if (!existing) {
         is_new_member = 1;
+        
+        // 🔥 ADD THE SENDER TO CLUSTER VIEW
+        cluster_member_t new_sender = {
+            .node_id = msg->sender_id,
+            .node_type = proto->my_type, // We don't know their type yet
+            .status = NODE_STATUS_ALIVE,
+            .incarnation = 0,
+            .last_seen_ms = time_now_ms()
+        };
+        
+        // Extract IP/port from sender
+        safe_strncpy(new_sender.ip_address, src_ip, MAX_IP_LEN);
+        new_sender.gossip_port = src_port;
+        new_sender.data_port = 0; // Unknown until we get metadata
+        
+        cluster_view_add(proto->cluster_view, &new_sender);
+        
+        LOG_INFO("SWIM: Added sender node %u to cluster view", msg->sender_id);
+        
+        if (proto->callbacks.on_member_alive) {
+            gossip_member_update_t update = {
+                .node_id = msg->sender_id,
+                .node_type = new_sender.node_type,
+                .status = NODE_STATUS_ALIVE,
+                .incarnation = 0,
+                .timestamp_ms = time_now_ms()
+            };
+            safe_strncpy(update.ip_address, src_ip, MAX_IP_LEN);
+            update.gossip_port = src_port;
+            
+            proto->callbacks.on_member_alive(msg->sender_id, &update, 
+                                            proto->callback_context);
+        }
     } else {
         cluster_view_release(proto->cluster_view);
     }

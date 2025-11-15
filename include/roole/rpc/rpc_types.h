@@ -46,13 +46,12 @@ typedef enum {
     FUNC_ID_SUBMIT_MESSAGE = 0x25,
     FUNC_ID_PROCESS_MESSAGE = 0x26,
     
-    // DAG management (Router operations)
-    FUNC_ID_ADD_DAG = 0x30,
-    FUNC_ID_UPDATE_DAG = 0x31,
-    FUNC_ID_REMOVE_DAG = 0x32,
-    FUNC_ID_GET_DAG = 0x33,
-    FUNC_ID_LIST_DAGS = 0x34,
-    FUNC_ID_GET_STATUS = 0x35
+    // Datastore management
+    FUNC_ID_DATASTORE_SET = 0x30,
+    FUNC_ID_DATASTORE_GET = 0x31,
+    FUNC_ID_DATASTORE_UNSET = 0x32,
+    FUNC_ID_DATASTORE_LIST = 0x33,
+    FUNC_ID_DATASTORE_SYNC = 0x34,
 } rpc_func_id_t;
 
 // RPC header structure

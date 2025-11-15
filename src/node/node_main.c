@@ -1,11 +1,10 @@
 // src/node/node_main.c
-// Production-ready node executable with proper lifecycle management
+// Simplified node executable - Pure distributed datastore
 
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/node/node_state.h"
 #include "roole/node/node_rpc.h"
-#include "roole/node/node_executor.h"
 #include "roole/config/config.h"
 #include "roole/config/config_validator.h"
 #include "roole/core/service_registry.h"
@@ -36,7 +35,6 @@ static void signal_handler(int signum) {
     
     g_shutdown_requested = 1;
     
-    // Signal the node to begin shutdown
     if (g_node_state) {
         g_node_state->shutdown_flag = 1;
     }
@@ -57,14 +55,13 @@ static void setup_signal_handlers(void) {
         LOG_ERROR("Failed to register SIGTERM handler");
     }
     
-    // Ignore SIGPIPE (broken pipe on socket write)
     signal(SIGPIPE, SIG_IGN);
     
     LOG_INFO("Signal handlers registered (SIGINT, SIGTERM)");
 }
 
 // ============================================================================
-// CONFIGURATION VALIDATION AND DISPLAY
+// CONFIGURATION DISPLAY
 // ============================================================================
 
 static void display_configuration(const roole_config_t *config) {
@@ -105,25 +102,6 @@ static void display_configuration(const roole_config_t *config) {
     LOG_INFO("========================================");
 }
 
-static int validate_and_display_config(const roole_config_t *config) {
-    validation_result_t validation;
-    validation_result_init(&validation);
-    
-    if (config_validate(config, &validation) != 0) {
-        LOG_ERROR("Configuration validation failed:");
-        validation_result_print(&validation);
-        return -1;
-    }
-    
-    if (validation.error_count > 0) {
-        LOG_WARN("Configuration has warnings:");
-        validation_result_print(&validation);
-    }
-    
-    display_configuration(config);
-    return 0;
-}
-
 // ============================================================================
 // GRACEFUL SHUTDOWN
 // ============================================================================
@@ -134,56 +112,13 @@ static void perform_graceful_shutdown(node_state_t *state) {
     LOG_INFO("========================================");
     
     // Phase 1: Stop accepting new work
-    LOG_INFO("[1/6] Stopping acceptance of new work...");
+    LOG_INFO("[1/3] Stopping acceptance of new requests...");
     state->shutdown_flag = 1;
-    sleep(1);  // Brief pause for in-flight RPC requests
-    LOG_INFO("  ✓ No longer accepting new work");
+    sleep(1);
+    LOG_INFO("  ✓ No longer accepting new requests");
     
-    // Phase 2: Drain message queue
-    LOG_INFO("[2/6] Draining message queue...");
-    message_queue_t *queue = node_state_get_message_queue(state);
-    int drain_attempts = 0;
-    const int max_drain_attempts = 30;  // 30 seconds max
-    
-    while (!message_queue_is_empty(queue) && drain_attempts < max_drain_attempts) {
-        size_t queue_size = message_queue_size(queue);
-        LOG_DEBUG("  Queue size: %zu, waiting...", queue_size);
-        sleep(1);
-        drain_attempts++;
-    }
-    
-    if (message_queue_is_empty(queue)) {
-        LOG_INFO("  ✓ Message queue drained");
-    } else {
-        LOG_WARN("  ⚠ Queue not empty after %d seconds, proceeding anyway", 
-                max_drain_attempts);
-    }
-    
-    // Phase 3: Wait for active executions
-    LOG_INFO("[3/6] Waiting for active executions to complete...");
-    int exec_wait_attempts = 0;
-    const int max_exec_wait = 60;  // 60 seconds max
-    
-    while (state->active_executions > 0 && exec_wait_attempts < max_exec_wait) {
-        LOG_DEBUG("  Active executions: %u", state->active_executions);
-        sleep(1);
-        exec_wait_attempts++;
-    }
-    
-    if (state->active_executions == 0) {
-        LOG_INFO("  ✓ All executions completed");
-    } else {
-        LOG_WARN("  ⚠ %u executions still active after %d seconds, forcing shutdown", 
-                state->active_executions, max_exec_wait);
-    }
-    
-    // Phase 4: Stop executor threads
-    LOG_INFO("[4/6] Stopping executor threads...");
-    node_stop_executors(state);
-    LOG_INFO("  ✓ Executor threads stopped");
-    
-    // Phase 5: Leave cluster gracefully
-    LOG_INFO("[5/6] Leaving cluster...");
+    // Phase 2: Leave cluster gracefully
+    LOG_INFO("[2/3] Leaving cluster...");
     if (state->membership) {
         membership_leave(state->membership);
         sleep(2);  // Give time for LEAVE message to propagate
@@ -192,8 +127,8 @@ static void perform_graceful_shutdown(node_state_t *state) {
         LOG_INFO("  ⓘ No membership to leave");
     }
     
-    // Phase 6: Shutdown services
-    LOG_INFO("[6/6] Shutting down node services...");
+    // Phase 3: Shutdown services
+    LOG_INFO("[3/3] Shutting down node services...");
     node_state_shutdown(state);
     LOG_INFO("  ✓ All services stopped");
     
@@ -204,9 +139,9 @@ static void perform_graceful_shutdown(node_state_t *state) {
     LOG_INFO("========================================");
     LOG_INFO("Final Statistics:");
     LOG_INFO("  Uptime: %lu seconds", stats.uptime_ms / 1000);
-    LOG_INFO("  Messages Processed: %lu", stats.messages_processed);
-    LOG_INFO("  Messages Failed: %lu", stats.messages_failed);
-    LOG_INFO("  Messages Routed: %lu", stats.messages_routed);
+    LOG_INFO("  Datastore Records: %zu", stats.datastore_records);
+    LOG_INFO("  Datastore Bytes: %zu", stats.datastore_bytes);
+    LOG_INFO("  Total Operations: %lu", stats.datastore_ops_total);
     LOG_INFO("  Cluster Size: %zu nodes", stats.cluster_size);
     LOG_INFO("========================================");
 }
@@ -217,33 +152,19 @@ static void perform_graceful_shutdown(node_state_t *state) {
 
 int main(int argc, char **argv) {
     // Parse command line arguments
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <config_file> <num_executor_threads>\n", argv[0]);
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <config_file>\n", argv[0]);
         fprintf(stderr, "\n");
         fprintf(stderr, "Arguments:\n");
-        fprintf(stderr, "  config_file           - Path to INI configuration file\n");
-        fprintf(stderr, "  num_executor_threads  - Number of executor threads (1-128)\n");
+        fprintf(stderr, "  config_file  - Path to INI configuration file\n");
         fprintf(stderr, "\n");
         fprintf(stderr, "Examples:\n");
-        fprintf(stderr, "  %s ./config/router.ini 2\n", argv[0]);
-        fprintf(stderr, "  %s ./config/worker_100.ini 4\n", argv[0]);
+        fprintf(stderr, "  %s ./config/router.ini\n", argv[0]);
+        fprintf(stderr, "  %s ./config/worker_100.ini\n", argv[0]);
         return 1;
     }
     
     const char *config_path = argv[1];
-    size_t num_executor_threads = (size_t)atoi(argv[2]);
-    
-    if (num_executor_threads == 0) {
-        fprintf(stderr, "ERROR: Invalid number of executor threads: %s\n", argv[2]);
-        fprintf(stderr, "Must be between 1 and 128\n");
-        return 1;
-    }
-    
-    if (num_executor_threads > 128) {
-        fprintf(stderr, "WARNING: Limiting executor threads from %zu to 128\n", 
-                num_executor_threads);
-        num_executor_threads = 128;
-    }
     
     // ========================================================================
     // INITIALIZATION PHASE
@@ -251,17 +172,17 @@ int main(int argc, char **argv) {
     
     printf("\n");
     printf("╔════════════════════════════════════════╗\n");
-    printf("║     ROOLE DISTRIBUTED NODE v1.0        ║\n");
+    printf("║  ROOLE DISTRIBUTED DATASTORE v2.0     ║\n");
+    printf("║  Pure Key-Value Storage Cluster       ║\n");
     printf("╚════════════════════════════════════════╝\n");
     printf("\n");
     
     // Initialize logger
     logger_init();
-    logger_set_level(LOG_LEVEL_DEBUG);
+    logger_set_level(LOG_LEVEL_INFO);
     
-    LOG_INFO("Starting Roole node...");
+    LOG_INFO("Starting Roole datastore node...");
     LOG_INFO("  Config file: %s", config_path);
-    LOG_INFO("  Executor threads: %zu", num_executor_threads);
     
     // Load configuration
     roole_config_t config;
@@ -278,12 +199,8 @@ int main(int argc, char **argv) {
                                  "router" : "worker";
     logger_set_context(config.node_id, config.cluster_name, node_type_str);
     
-    // Validate configuration
-    if (validate_and_display_config(&config) != 0) {
-        logger_shutdown();
-        return 1;
-    }
-    
+    // Display configuration
+    display_configuration(&config);
     LOG_INFO("✓ Configuration validated");
     
     // Create global service registry
@@ -300,10 +217,10 @@ int main(int argc, char **argv) {
     // NODE INITIALIZATION
     // ========================================================================
     
-    LOG_INFO("Initializing node state...");
+    LOG_INFO("Initializing node state (pure datastore mode)...");
     
     node_state_t *state = NULL;
-    result_t init_result = node_state_init(&state, &config, num_executor_threads);
+    result_t init_result = node_state_init(&state, &config);
     
     if (result_is_error(&init_result)) {
         LOG_ERROR("Failed to initialize node state:");
@@ -313,7 +230,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     
-    g_node_state = state;  // Set global for signal handler
+    g_node_state = state;
     
     LOG_INFO("✓ Node state initialized");
     
@@ -336,9 +253,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     
-    LOG_INFO("✓ Executor threads started (%zu)", num_executor_threads);
-    LOG_INFO("✓ Cleanup thread started");
-    LOG_INFO("✓ Metrics update thread started");
+    LOG_INFO("✓ Background threads started");
     
     // Setup signal handlers
     setup_signal_handlers();
@@ -360,8 +275,7 @@ int main(int argc, char **argv) {
     
     LOG_INFO("✓ RPC servers started");
     
-    // Brief pause to ensure RPC servers are fully bound
-    sleep(1);
+    sleep(1);  // Brief pause to ensure servers are bound
     
     // ========================================================================
     // CLUSTER BOOTSTRAP
@@ -372,7 +286,7 @@ int main(int argc, char **argv) {
     result_t bootstrap_result = node_state_bootstrap(state, &config);
     
     if (result_is_error(&bootstrap_result)) {
-        LOG_WARN("Bootstrap failed or timed out:");
+        LOG_WARN("Bootstrap warning:");
         result_log_error(&bootstrap_result);
         LOG_INFO("Continuing - node will discover cluster via gossip");
     } else {
@@ -398,7 +312,7 @@ int main(int argc, char **argv) {
              state->identity.data_port);
     
     if (state->capabilities.has_ingress) {
-        LOG_INFO("  Ingress: %s:%u (accepting client requests)", 
+        LOG_INFO("  Ingress: %s:%u (client requests)", 
                  state->identity.bind_addr, state->identity.ingress_port);
     }
     
@@ -407,6 +321,9 @@ int main(int argc, char **argv) {
                  state->identity.bind_addr, state->identity.metrics_port);
     }
     
+    LOG_INFO("========================================");
+    LOG_INFO("Distributed Key-Value Datastore Ready");
+    LOG_INFO("Operations: SET, GET, UNSET, LIST");
     LOG_INFO("========================================");
     LOG_INFO("Press Ctrl+C to initiate graceful shutdown");
     LOG_INFO("========================================");
@@ -423,13 +340,10 @@ int main(int argc, char **argv) {
             node_statistics_t stats;
             node_state_get_statistics(state, &stats);
             
-            LOG_INFO("Status: uptime=%lus | processed=%lu | failed=%lu | "
-                    "queue=%zu | active=%u | cluster=%zu",
+            LOG_INFO("Status: uptime=%lus | records=%zu | bytes=%zu | cluster=%zu",
                     stats.uptime_ms / 1000,
-                    stats.messages_processed,
-                    stats.messages_failed,
-                    stats.queue_depth,
-                    stats.active_executions,
+                    stats.datastore_records,
+                    stats.datastore_bytes,
                     stats.cluster_size);
             
             last_status_log = now;

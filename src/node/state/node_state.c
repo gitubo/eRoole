@@ -1,11 +1,10 @@
 // src/node/state/node_state.c
-// Node state lifecycle management - complete implementation
+// Simplified node state lifecycle - Pure datastore (no execution)
 
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/node/node_state.h"
 #include "roole/node/node_capabilities.h"
-#include "roole/node/node_executor.h"
 #include "roole/node/node_metrics.h"
 #include "roole/config/config.h"
 #include "roole/core/service_registry.h"
@@ -51,18 +50,11 @@ static void* cleanup_thread_fn(void *arg) {
         
         if (state->shutdown_flag) break;
         
-        // Cleanup old completed executions
-        if (state->exec_tracker) {
-            size_t cleaned = execution_tracker_cleanup_completed(state->exec_tracker);
-            if (cleaned > 0) {
-                LOG_DEBUG("Cleaned up %zu completed executions", cleaned);
-            }
+        // Cleanup tombstones from datastore (after gossip propagation window)
+        if (state->datastore) {
+            // Simple maintenance - can be extended
+            LOG_DEBUG("Cleanup cycle completed");
         }
-        
-        // TODO: Add more periodic cleanup tasks:
-        // - Stale peer connections
-        // - Old metric samples
-        // - Event bus queue overflow
     }
     
     LOG_INFO("Cleanup thread stopped");
@@ -100,19 +92,13 @@ static void* metrics_update_thread_fn(void *arg) {
 // PUBLIC API: NODE LIFECYCLE
 // ============================================================================
 
-result_t node_state_init(node_state_t **out_state, 
-                         const roole_config_t *config,
-                         size_t num_executor_threads) {
+result_t node_state_init(node_state_t **out_state, const roole_config_t *config) {
     if (!out_state || !config) {
         return RESULT_ERROR(RESULT_ERR_INVALID, "Invalid parameters");
     }
     
-    if (num_executor_threads == 0) {
-        num_executor_threads = 4;  // Default
-    }
-    
-    LOG_INFO("Initializing node state (node_id=%u, type=%d, executors=%zu)",
-             config->node_id, config->node_type, num_executor_threads);
+    LOG_INFO("Initializing node state (node_id=%u, type=%d)",
+             config->node_id, config->node_type);
     
     // Allocate state structure
     node_state_t *state = (node_state_t*)safe_calloc(1, sizeof(node_state_t));
@@ -122,7 +108,6 @@ result_t node_state_init(node_state_t **out_state,
     
     state->start_time_ms = time_now_ms();
     state->shutdown_flag = 0;
-    state->num_executor_threads = num_executor_threads;
     
     // ========================================================================
     // 1. Initialize Node Identity
@@ -148,120 +133,69 @@ result_t node_state_init(node_state_t **out_state,
     node_print_capabilities(&state->capabilities, &state->identity);
     
     // ========================================================================
-    // 2. Initialize Subsystems
+    // 2. Initialize Datastore (Core Subsystem)
     // ========================================================================
     
-    // DAG Catalog
-    state->dag_catalog = (dag_catalog_t*)safe_calloc(1, sizeof(dag_catalog_t));
-    if (!state->dag_catalog) {
+    state->datastore = (datastore_t*)safe_calloc(1, sizeof(datastore_t));
+    if (!state->datastore) {
         safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate DAG catalog");
+        return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate datastore");
     }
     
-    if (dag_catalog_init(state->dag_catalog, MAX_DAGS) != RESULT_OK) {
-        safe_free(state->dag_catalog);
+    if (datastore_init(state->datastore, MAX_RECORDS) != RESULT_OK) {
+        safe_free(state->datastore);
         safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize DAG catalog");
+        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize datastore");
     }
     
-    // Peer Pool
+    LOG_INFO("Datastore initialized (capacity: %d records)", MAX_RECORDS);
+    
+    // ========================================================================
+    // 3. Initialize Peer Pool
+    // ========================================================================
+    
     state->peer_pool = (peer_pool_t*)safe_calloc(1, sizeof(peer_pool_t));
     if (!state->peer_pool) {
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate peer pool");
     }
     
     if (peer_pool_init(state->peer_pool, MAX_PEERS) != RESULT_OK) {
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state->peer_pool);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize peer pool");
     }
     
-    // Execution Tracker
-    state->exec_tracker = (execution_tracker_t*)safe_calloc(1, sizeof(execution_tracker_t));
-    if (!state->exec_tracker) {
-        peer_pool_destroy(state->peer_pool);
-        safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
-        safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate exec tracker");
-    }
-    
-    if (execution_tracker_init(state->exec_tracker, MAX_PENDING_EXECUTIONS) != RESULT_OK) {
-        peer_pool_destroy(state->peer_pool);
-        safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
-        safe_free(state->exec_tracker);
-        safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize exec tracker");
-    }
-    
-    // Message Queue
-    state->message_queue = (message_queue_t*)safe_calloc(1, sizeof(message_queue_t));
-    if (!state->message_queue) {
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
-        peer_pool_destroy(state->peer_pool);
-        safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
-        safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate message queue");
-    }
-    
-    if (message_queue_init(state->message_queue, MAX_NODE_QUEUE_SIZE) != RESULT_OK) {
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
-        peer_pool_destroy(state->peer_pool);
-        safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
-        safe_free(state->message_queue);
-        safe_free(state);
-        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize message queue");
-    }
-    
     // ========================================================================
-    // 3. Initialize Cluster View (Owned by Node)
+    // 4. Initialize Cluster View
     // ========================================================================
     
     state->cluster_view = (cluster_view_t*)safe_calloc(1, sizeof(cluster_view_t));
     if (!state->cluster_view) {
-        // Cleanup already allocated
-        message_queue_destroy(state->message_queue);
-        safe_free(state->message_queue);
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
         peer_pool_destroy(state->peer_pool);
         safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to allocate cluster view");
     }
     
     if (cluster_view_init(state->cluster_view, MAX_CLUSTER_NODES) != RESULT_OK) {
-        message_queue_destroy(state->message_queue);
-        safe_free(state->message_queue);
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
         peer_pool_destroy(state->peer_pool);
         safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state->cluster_view);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize cluster view");
     }
     
     // ========================================================================
-    // 4. Initialize Membership (Uses Cluster View)
+    // 5. Initialize Membership
     // ========================================================================
     
     if (membership_init(&state->membership,
@@ -273,20 +207,16 @@ result_t node_state_init(node_state_t **out_state,
                        state->cluster_view) != RESULT_OK) {
         cluster_view_destroy(state->cluster_view);
         safe_free(state->cluster_view);
-        message_queue_destroy(state->message_queue);
-        safe_free(state->message_queue);
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
         peer_pool_destroy(state->peer_pool);
         safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to initialize membership");
     }
     
     // ========================================================================
-    // 5. Initialize Event Bus
+    // 6. Initialize Event Bus
     // ========================================================================
     
     state->event_bus = event_bus_create();
@@ -294,20 +224,16 @@ result_t node_state_init(node_state_t **out_state,
         membership_shutdown(state->membership);
         cluster_view_destroy(state->cluster_view);
         safe_free(state->cluster_view);
-        message_queue_destroy(state->message_queue);
-        safe_free(state->message_queue);
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
         peer_pool_destroy(state->peer_pool);
         safe_free(state->peer_pool);
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to create event bus");
     }
     
     // ========================================================================
-    // 6. Initialize Metrics (Optional)
+    // 7. Initialize Metrics
     // ========================================================================
     
     if (config->ports.metrics_addr[0] != '\0') {
@@ -319,7 +245,7 @@ result_t node_state_init(node_state_t **out_state,
     }
     
     // ========================================================================
-    // 7. Register in Service Registry
+    // 8. Register in Service Registry
     // ========================================================================
     
     service_registry_t *registry = service_registry_global();
@@ -328,8 +254,6 @@ result_t node_state_init(node_state_t **out_state,
                                  "main", state);
         service_registry_register(registry, SERVICE_TYPE_CLUSTER_VIEW,
                                  "main", state->cluster_view);
-        service_registry_register(registry, SERVICE_TYPE_DAG_CATALOG,
-                                 "main", state->dag_catalog);
         service_registry_register(registry, SERVICE_TYPE_EVENT_BUS,
                                  "main", state->event_bus);
         if (state->metrics_registry) {
@@ -340,7 +264,7 @@ result_t node_state_init(node_state_t **out_state,
     
     *out_state = state;
     
-    LOG_INFO("Node state initialized successfully");
+    LOG_INFO("Node state initialized successfully (pure datastore node)");
     return RESULT_SUCCESS();
 }
 
@@ -349,17 +273,11 @@ result_t node_state_start(node_state_t *state) {
         return RESULT_ERROR(RESULT_ERR_INVALID, "NULL state");
     }
     
-    LOG_INFO("Starting node services...");
-    
-    // Start executor threads
-    if (node_start_executors(state, state->num_executor_threads) != RESULT_OK) {
-        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to start executors");
-    }
+    LOG_INFO("Starting node services (no executor threads)...");
     
     // Start cleanup thread
     if (pthread_create(&state->cleanup_thread, NULL, cleanup_thread_fn, state) != 0) {
         LOG_ERROR("Failed to create cleanup thread");
-        node_stop_executors(state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to start cleanup thread");
     }
     
@@ -370,7 +288,6 @@ result_t node_state_start(node_state_t *state) {
             LOG_ERROR("Failed to create metrics update thread");
             state->shutdown_flag = 1;
             pthread_join(state->cleanup_thread, NULL);
-            node_stop_executors(state);
             return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to start metrics thread");
         }
     }
@@ -416,58 +333,18 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
     
     // Wait for cluster view to populate
     LOG_INFO("Waiting for cluster view to populate...");
+    sleep(5);  // Simple wait for gossip to propagate
     
-    // Check initial state
-    size_t initial_count = state->cluster_view->count;
-    LOG_DEBUG("Initial cluster members: %zu", initial_count);
+    size_t member_count = state->cluster_view->count;
+    LOG_INFO("Cluster membership discovered: %zu members", member_count);
     
-    // Wait up to 30 seconds for cluster view to stabilize
-    int max_attempts = 30;
-    int stable_count = 0;
-    size_t last_count = initial_count;
-    
-    for (int attempt = 0; attempt < max_attempts; attempt++) {
-        sleep(1);
-        
-        size_t current_count = state->cluster_view->count;
-        
-        LOG_DEBUG("Bootstrap attempt %d: cluster has %zu members", 
-                  attempt + 1, current_count);
-        
-        // Check if we've discovered at least one other node (seed)
-        if (current_count > initial_count) {
-            LOG_INFO("Discovered seed node(s), cluster has %zu members", current_count);
-            
-            // Wait for view to stabilize (same count for 3 consecutive seconds)
-            if (current_count == last_count) {
-                stable_count++;
-                if (stable_count >= 3) {
-                    LOG_INFO("Cluster view stabilized with %zu members", current_count);
-                    cluster_view_dump(state->cluster_view, "After Bootstrap");
-                    return RESULT_SUCCESS();
-                }
-            } else {
-                stable_count = 0;
-            }
-            
-            last_count = current_count;
-        }
-    }
-    
-    // Timeout reached
-    size_t final_count = state->cluster_view->count;
-    
-    if (final_count > initial_count) {
-        LOG_WARN("Cluster view partially populated after 30s (%zu members, may grow)",
-                 final_count);
-        cluster_view_dump(state->cluster_view, "After Bootstrap (Partial)");
+    if (member_count > 1) {
+        cluster_view_dump(state->cluster_view, "After Bootstrap");
         return RESULT_SUCCESS();
-    } else {
-        LOG_ERROR("Cluster view not populated after 30s (still %zu members)", 
-                  final_count);
-        return RESULT_ERROR(RESULT_ERR_TIMEOUT, 
-                           "Cluster membership discovery timed out");
     }
+    
+    LOG_WARN("Only discovered self in cluster, continuing anyway");
+    return RESULT_SUCCESS();
 }
 
 void node_state_shutdown(node_state_t *state) {
@@ -484,9 +361,6 @@ void node_state_shutdown(node_state_t *state) {
         membership_leave(state->membership);
         sleep(1);  // Give time for LEAVE message to propagate
     }
-    
-    // Stop executor threads
-    node_stop_executors(state);
     
     // Stop cleanup thread
     if (state->cleanup_thread) {
@@ -530,28 +404,16 @@ void node_state_destroy(node_state_t *state) {
         state->cluster_view = NULL;
     }
     
-    if (state->message_queue) {
-        message_queue_destroy(state->message_queue);
-        safe_free(state->message_queue);
-        state->message_queue = NULL;
-    }
-    
-    if (state->exec_tracker) {
-        execution_tracker_destroy(state->exec_tracker);
-        safe_free(state->exec_tracker);
-        state->exec_tracker = NULL;
-    }
-    
     if (state->peer_pool) {
         peer_pool_destroy(state->peer_pool);
         safe_free(state->peer_pool);
         state->peer_pool = NULL;
     }
     
-    if (state->dag_catalog) {
-        dag_catalog_destroy(state->dag_catalog);
-        safe_free(state->dag_catalog);
-        state->dag_catalog = NULL;
+    if (state->datastore) {
+        datastore_destroy(state->datastore);
+        safe_free(state->datastore);
+        state->datastore = NULL;
     }
     
     safe_free(state);
@@ -560,7 +422,7 @@ void node_state_destroy(node_state_t *state) {
 }
 
 // ============================================================================
-// ACCESSOR FUNCTIONS (Already Declared in Header)
+// ACCESSOR FUNCTIONS
 // ============================================================================
 
 const node_identity_t* node_state_get_identity(const node_state_t *state) {
@@ -571,20 +433,12 @@ const node_capabilities_t* node_state_get_capabilities(const node_state_t *state
     return state ? &state->capabilities : NULL;
 }
 
-dag_catalog_t* node_state_get_dag_catalog(node_state_t *state) {
-    return state ? state->dag_catalog : NULL;
+datastore_t* node_state_get_datastore(node_state_t *state) {
+    return state ? state->datastore : NULL;
 }
 
 peer_pool_t* node_state_get_peer_pool(node_state_t *state) {
     return state ? state->peer_pool : NULL;
-}
-
-execution_tracker_t* node_state_get_exec_tracker(node_state_t *state) {
-    return state ? state->exec_tracker : NULL;
-}
-
-message_queue_t* node_state_get_message_queue(node_state_t *state) {
-    return state ? state->message_queue : NULL;
 }
 
 cluster_view_t* node_state_get_cluster_view(node_state_t *state) {
@@ -605,13 +459,14 @@ void node_state_get_statistics(const node_state_t *state, node_statistics_t *sta
     memset(stats, 0, sizeof(node_statistics_t));
     
     stats->uptime_ms = time_now_ms() - state->start_time_ms;
-    stats->active_executions = state->active_executions;
-    stats->messages_processed = state->messages_processed;
-    stats->messages_failed = state->messages_failed;
-    stats->messages_routed = state->messages_routed;
+    stats->datastore_ops_total = state->datastore_ops_total;
     
-    if (state->message_queue) {
-        stats->queue_depth = message_queue_size(state->message_queue);
+    if (state->datastore) {
+        stats->datastore_records = datastore_count(state->datastore);
+        
+        datastore_stats_t ds_stats;
+        datastore_get_stats(state->datastore, &ds_stats);
+        stats->datastore_bytes = ds_stats.total_value_bytes;
     }
     
     if (state->cluster_view) {

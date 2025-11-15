@@ -1,3 +1,6 @@
+// src/node/node_metrics.c
+// Simplified metrics - Datastore and cluster only
+
 #define _POSIX_C_SOURCE 200809L
 
 #include "roole/node/node_state.h"
@@ -10,14 +13,40 @@
 #include <string.h>
 
 // ============================================================================
-// UNIFIED METRICS INITIALIZATION
+// DATASTORE CHANGE CALLBACK
 // ============================================================================
-static void on_dag_catalog_changed(size_t new_count, void *user_data) {
+
+static void on_datastore_changed(const char *key, const char *op, void *user_data) {
     node_state_t *state = (node_state_t*)user_data;
-    if (state && state->metric_dag_catalog_size) {
-        metrics_gauge_set(state->metric_dag_catalog_size, (double)new_count);
+    if (!state) return;
+    
+    // Update datastore size metric
+    if (state->metric_datastore_size) {
+        size_t count = datastore_count(state->datastore);
+        metrics_gauge_set(state->metric_datastore_size, (double)count);
     }
+    
+    // Update datastore bytes metric
+    if (state->metric_datastore_bytes) {
+        datastore_stats_t stats;
+        datastore_get_stats(state->datastore, &stats);
+        metrics_gauge_set(state->metric_datastore_bytes, 
+                         (double)stats.total_value_bytes);
+    }
+    
+    // Increment operation counters
+    if (strcmp(op, "set") == 0 && state->metric_datastore_sets) {
+        metrics_counter_inc(state->metric_datastore_sets);
+    } else if (strcmp(op, "unset") == 0 && state->metric_datastore_unsets) {
+        metrics_counter_inc(state->metric_datastore_unsets);
+    }
+    
+    LOG_DEBUG("Datastore changed: key=%s, op=%s", key, op);
 }
+
+// ============================================================================
+// METRICS INITIALIZATION
+// ============================================================================
 
 int node_metrics_init(node_state_t *state, const char *metrics_addr) {
     if (!state) return RESULT_ERR_INVALID;
@@ -70,51 +99,49 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr) {
     safe_strncpy(labels[2].name, "node_type", MAX_LABEL_NAME_LEN);
     safe_strncpy(labels[2].value, node_type_label, MAX_LABEL_VALUE_LEN);
     
-    // Create counter metrics
-    state->metric_messages_processed = metrics_get_or_create_counter(
+    // ========================================================================
+    // DATASTORE METRICS
+    // ========================================================================
+    
+    state->metric_datastore_size = metrics_get_or_create_gauge(
         state->metrics_registry,
-        "messages_processed_total",
-        "Total number of messages successfully processed",
+        "datastore_records",
+        "Number of records in the datastore",
         3, labels
     );
     
-    state->metric_messages_failed = metrics_get_or_create_counter(
+    state->metric_datastore_bytes = metrics_get_or_create_gauge(
         state->metrics_registry,
-        "messages_failed_total",
-        "Total number of messages that failed processing",
+        "datastore_bytes_total",
+        "Total bytes stored in datastore values",
         3, labels
     );
     
-    state->metric_messages_routed = metrics_get_or_create_counter(
+    state->metric_datastore_sets = metrics_get_or_create_counter(
         state->metrics_registry,
-        "messages_routed_total",
-        "Total number of messages routed to other nodes",
+        "datastore_sets_total",
+        "Total number of SET operations",
         3, labels
     );
     
-    // Create gauge metrics
-    state->metric_queue_size = metrics_get_or_create_gauge(
+    state->metric_datastore_gets = metrics_get_or_create_counter(
         state->metrics_registry,
-        "messages_queue_size",
-        "Current number of messages in processing queue",
+        "datastore_gets_total",
+        "Total number of GET operations",
         3, labels
     );
     
-    state->metric_active_executions = metrics_get_or_create_gauge(
+    state->metric_datastore_unsets = metrics_get_or_create_counter(
         state->metrics_registry,
-        "active_executions",
-        "Number of currently executing messages",
+        "datastore_unsets_total",
+        "Total number of UNSET operations",
         3, labels
     );
     
-    state->metric_uptime_seconds = metrics_get_or_create_gauge(
-        state->metrics_registry,
-        "uptime_seconds",
-        "Node uptime in seconds",
-        3, labels
-    );
+    // ========================================================================
+    // CLUSTER METRICS
+    // ========================================================================
     
-    // Cluster metrics
     state->metric_cluster_members_total = metrics_get_or_create_gauge(
         state->metrics_registry,
         "cluster_members_total",
@@ -142,38 +169,21 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr) {
         "Number of dead cluster members",
         3, labels
     );
-
-    state->metric_dag_catalog_size = metrics_get_or_create_gauge(
+    
+    // ========================================================================
+    // SYSTEM METRICS
+    // ========================================================================
+    
+    state->metric_uptime_seconds = metrics_get_or_create_gauge(
         state->metrics_registry,
-        "dag_catalog_size",
-        "Number of DAGs in the catalog",
-        3, labels
-    );
-
-    // Create histogram metrics
-    state->histogram_exec_duration = metrics_get_or_create_histogram(
-        state->metrics_registry,
-        "execution_duration_ms",
-        "Histogram of message execution duration in milliseconds",
-        HISTOGRAM_BUCKETS_LATENCY_MS,
+        "uptime_seconds",
+        "Node uptime in seconds",
         3, labels
     );
     
-    state->histogram_queue_wait = metrics_get_or_create_histogram(
-        state->metrics_registry,
-        "message_queue_wait_ms",
-        "Histogram of time messages spend in queue before processing",
-        HISTOGRAM_BUCKETS_LATENCY_MS,
-        3, labels
-    );
-    
-    state->histogram_message_size = metrics_get_or_create_histogram(
-        state->metrics_registry,
-        "message_size_bytes",
-        "Histogram of message sizes in bytes",
-        HISTOGRAM_BUCKETS_SIZE_BYTES,
-        3, labels
-    );
+    // ========================================================================
+    // HISTOGRAM METRICS
+    // ========================================================================
     
     state->histogram_gossip_rtt = metrics_get_or_create_histogram(
         state->metrics_registry,
@@ -183,14 +193,30 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr) {
         3, labels
     );
     
-    LOG_INFO("All metrics created with standard labels (cluster_name, node_id, node_type)");
-
-    dag_catalog_t *catalog = node_state_get_dag_catalog(state);
-    if (catalog) {
-        dag_catalog_set_change_callback(catalog, on_dag_catalog_changed, state);
+    state->histogram_datastore_op_duration = metrics_get_or_create_histogram(
+        state->metrics_registry,
+        "datastore_op_duration_ms",
+        "Histogram of datastore operation duration in milliseconds",
+        HISTOGRAM_BUCKETS_LATENCY_MS,
+        3, labels
+    );
+    
+    LOG_INFO("All metrics created with standard labels");
+    
+    // ========================================================================
+    // Register datastore change callback
+    // ========================================================================
+    
+    datastore_t *store = node_state_get_datastore(state);
+    if (store) {
+        datastore_set_change_callback(store, on_datastore_changed, state);
+        LOG_INFO("Datastore change callback registered");
     }
-
+    
+    // ========================================================================
     // Start HTTP server
+    // ========================================================================
+    
     state->metrics_server = metrics_server_start(
         state->metrics_registry,
         metrics_ip,
@@ -226,6 +252,9 @@ void node_metrics_shutdown(node_state_t *state) {
     LOG_INFO("Metrics system shutdown complete");
 }
 
+// ============================================================================
+// CLUSTER METRICS UPDATE
+// ============================================================================
 
 void node_metrics_update_cluster(node_state_t *state) {
     if (!state) return;
@@ -275,12 +304,12 @@ void node_metrics_update_cluster(node_state_t *state) {
     }
 }
 
+// ============================================================================
+// PERIODIC METRICS UPDATE
+// ============================================================================
+
 void node_metrics_update_periodic(node_state_t *state) {
     if (!state || !state->metrics_registry) return;
-    
-    // Get subsystems
-    message_queue_t *queue = node_state_get_message_queue(state);
-    //cluster_view_t *view = node_state_get_cluster_view(state);
     
     // Update uptime
     if (state->metric_uptime_seconds) {
@@ -288,16 +317,19 @@ void node_metrics_update_periodic(node_state_t *state) {
         metrics_gauge_set(state->metric_uptime_seconds, (double)uptime_seconds);
     }
     
-    // Update queue size
-    if (state->metric_queue_size && queue) {
-        size_t queue_size = message_queue_size(queue);
-        metrics_gauge_set(state->metric_queue_size, (double)queue_size);
-    }
-    
-    // Update active executions
-    if (state->metric_active_executions) {
-        metrics_gauge_set(state->metric_active_executions, 
-                         (double)state->active_executions);
+    // Update datastore metrics
+    if (state->datastore) {
+        if (state->metric_datastore_size) {
+            size_t count = datastore_count(state->datastore);
+            metrics_gauge_set(state->metric_datastore_size, (double)count);
+        }
+        
+        if (state->metric_datastore_bytes) {
+            datastore_stats_t stats;
+            datastore_get_stats(state->datastore, &stats);
+            metrics_gauge_set(state->metric_datastore_bytes, 
+                             (double)stats.total_value_bytes);
+        }
     }
     
     // Update cluster metrics
@@ -316,9 +348,9 @@ void node_metrics_update_periodic(node_state_t *state) {
             static uint64_t last_log = 0;
             uint64_t now = time_now_ms();
             if (now - last_log > 60000) {  // Every 60 seconds
-                LOG_INFO("Event bus stats: published=%lu dispatched=%lu dropped=%lu queue=%lu subs=%lu",
+                LOG_INFO("Event bus: published=%lu dispatched=%lu dropped=%lu queue=%lu",
                         stats.events_published, stats.events_dispatched, 
-                        stats.events_dropped, stats.queue_size, stats.subscribers_total);
+                        stats.events_dropped, stats.queue_size);
                 last_log = now;
             }
         }

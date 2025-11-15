@@ -132,6 +132,20 @@ void gossip_protocol_run_swim_round(gossip_protocol_t *proto)
         .sequence_num = __sync_fetch_and_add(&proto->sequence_num, 1),
         .num_updates = 0
     };
+
+    gossip_member_update_t self_update = {
+        .node_id = proto->my_id,
+        .node_type = proto->my_type,  // ← This is critical!
+        .status = NODE_STATUS_ALIVE,
+        .incarnation = proto->incarnation,
+        .gossip_port = proto->gossip_port,
+        .data_port = proto->data_port,
+        .timestamp_ms = time_now_ms()
+    };
+    safe_strncpy(self_update.ip_address, proto->my_ip, MAX_IP_LEN);
+
+    ping_msg.updates[0] = self_update;
+    ping_msg.num_updates = 1;
     
     // Include cluster state (anti-entropy)
     pthread_rwlock_rdlock(&proto->cluster_view->lock);
