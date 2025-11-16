@@ -1,6 +1,5 @@
 // src/raft/datastore/raft_datastore.c
-// Strongly consistent key-value store backed by Raft consensus
-// This REPLACES the old eventually-consistent datastore
+// COMPLETE IMPLEMENTATION: All helper functions included
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -14,9 +13,12 @@
 #include <endian.h>
 
 // ============================================================================
-// INTERNAL HELPERS
+// INTERNAL HELPER FUNCTIONS
 // ============================================================================
 
+/**
+ * Find record by key (caller must hold lock)
+ */
 static raft_kv_record_t* find_record(raft_datastore_t *store, const char *key) {
     for (size_t i = 0; i < store->capacity; i++) {
         if (store->records[i].active &&
@@ -27,6 +29,9 @@ static raft_kv_record_t* find_record(raft_datastore_t *store, const char *key) {
     return NULL;
 }
 
+/**
+ * Find free slot for new record (caller must hold lock)
+ */
 static raft_kv_record_t* find_free_slot(raft_datastore_t *store) {
     for (size_t i = 0; i < store->capacity; i++) {
         if (!store->records[i].active) {
@@ -54,7 +59,6 @@ raft_datastore_t* raft_datastore_create(raft_state_t *raft_state, size_t capacit
     
     store->raft_state = raft_state;
     store->capacity = capacity;
-    store->count = 0;
     
     store->records = safe_calloc(capacity, sizeof(raft_kv_record_t));
     if (!store->records) {
@@ -86,6 +90,16 @@ raft_datastore_t* raft_datastore_create(raft_state_t *raft_state, size_t capacit
         safe_free(store);
         return NULL;
     }
+    
+    // ✅ Initialize atomic metrics (zero initialization)
+    atomic_store_explicit(&store->metrics.record_count, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.total_bytes, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.sets_completed, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.gets_completed, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.deletes_completed, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.sets_failed, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.gets_notfound, 0, memory_order_relaxed);
+    atomic_store_explicit(&store->metrics.log_index_applied, 0, memory_order_relaxed);
     
     LOG_INFO("Raft KV: Created strongly consistent datastore (capacity=%zu)", capacity);
     return store;
@@ -120,7 +134,10 @@ void raft_datastore_destroy(raft_datastore_t *store) {
 // COMMAND SERIALIZATION
 // ============================================================================
 
-// Format: [cmd_type:1][key_len:2][key][value_len:4][value]
+/**
+ * Serialize SET command
+ * Format: [cmd_type:1][key_len:2][key][value_len:4][value]
+ */
 size_t raft_cmd_serialize_set(const char *key,
                                const uint8_t *value,
                                size_t value_len,
@@ -161,7 +178,10 @@ size_t raft_cmd_serialize_set(const char *key,
     return offset;
 }
 
-// Format: [cmd_type:1][key_len:2][key]
+/**
+ * Serialize UNSET command
+ * Format: [cmd_type:1][key_len:2][key]
+ */
 size_t raft_cmd_serialize_unset(const char *key,
                                  uint8_t *buffer,
                                  size_t buffer_size) {
@@ -194,6 +214,7 @@ size_t raft_cmd_serialize_unset(const char *key,
 
 // ============================================================================
 // COMMAND EXECUTION (STATE MACHINE)
+// This is where inline metric updates happen!
 // ============================================================================
 
 int raft_cmd_deserialize_and_execute(const uint8_t *data,
@@ -227,7 +248,7 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
     pthread_rwlock_wrlock(&store->lock);
     
     if (cmd_type == RAFT_CMD_SET) {
-        // Value length
+        // Parse value
         if (offset + 4 > len) {
             pthread_rwlock_unlock(&store->lock);
             return -1;
@@ -248,10 +269,18 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
         // Find or create record
         raft_kv_record_t *record = find_record(store, key);
         
+        int is_new_record = 0;
+        size_t old_value_len = 0;
+        
         if (!record) {
+            // New record
             record = find_free_slot(store);
             if (!record) {
                 pthread_rwlock_unlock(&store->lock);
+                
+                // ✅ INLINE METRIC UPDATE: Store full
+                atomic_fetch_add_explicit(&store->metrics.sets_failed, 1, memory_order_relaxed);
+                
                 LOG_ERROR("Raft KV: Store full, cannot SET %s", key);
                 return -1;
             }
@@ -259,9 +288,10 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
             safe_strncpy(record->key, key, RAFT_KV_MAX_KEY_LEN);
             record->created_at_ms = time_now_ms();
             record->active = 1;
-            store->count++;
+            is_new_record = 1;
         } else {
-            // Free old value
+            // Update existing record - track old size for byte delta
+            old_value_len = record->value_len;
             if (record->value) {
                 safe_free(record->value);
             }
@@ -279,25 +309,46 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
         record->version++;
         record->updated_at_ms = time_now_ms();
         
-        store->total_sets++;
+        pthread_rwlock_unlock(&store->lock);
         
-        LOG_INFO("Raft KV: SET %s (len=%u, version=%lu)", key, value_len, record->version);
+        // ✅ INLINE METRIC UPDATES (after lock released)
+        if (is_new_record) {
+            // New record: increment count and add bytes
+            atomic_fetch_add_explicit(&store->metrics.record_count, 1, memory_order_relaxed);
+            atomic_fetch_add_explicit(&store->metrics.total_bytes, value_len, memory_order_relaxed);
+        } else {
+            // Update: adjust total bytes (subtract old, add new)
+            atomic_fetch_sub_explicit(&store->metrics.total_bytes, old_value_len, memory_order_relaxed);
+            atomic_fetch_add_explicit(&store->metrics.total_bytes, value_len, memory_order_relaxed);
+        }
+        atomic_fetch_add_explicit(&store->metrics.sets_completed, 1, memory_order_relaxed);
+        
+        LOG_INFO("Raft KV: SET %s (len=%u, version=%lu, new=%d)", 
+                 key, value_len, record->version, is_new_record);
         
     } else if (cmd_type == RAFT_CMD_UNSET) {
         // Find and delete record
         raft_kv_record_t *record = find_record(store, key);
         
         if (record) {
+            size_t old_value_len = record->value_len;
+            
             if (record->value) {
                 safe_free(record->value);
                 record->value = NULL;
             }
             record->active = 0;
-            store->count--;
-            store->total_unsets++;
             
-            LOG_INFO("Raft KV: UNSET %s", key);
+            pthread_rwlock_unlock(&store->lock);
+            
+            // ✅ INLINE METRIC UPDATES (after lock released)
+            atomic_fetch_sub_explicit(&store->metrics.record_count, 1, memory_order_relaxed);
+            atomic_fetch_sub_explicit(&store->metrics.total_bytes, old_value_len, memory_order_relaxed);
+            atomic_fetch_add_explicit(&store->metrics.deletes_completed, 1, memory_order_relaxed);
+            
+            LOG_INFO("Raft KV: UNSET %s (freed %zu bytes)", key, old_value_len);
         } else {
+            pthread_rwlock_unlock(&store->lock);
             LOG_DEBUG("Raft KV: UNSET %s (not found)", key);
         }
     } else {
@@ -306,8 +357,6 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
         return -1;
     }
     
-    pthread_rwlock_unlock(&store->lock);
-    
     // Signal any waiting threads
     pthread_cond_broadcast(&store->commit_cond);
     
@@ -315,7 +364,7 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
 }
 
 // ============================================================================
-// STATE MACHINE CALLBACKS
+// STATE MACHINE CALLBACKS (Called by Raft)
 // ============================================================================
 
 int raft_datastore_apply(const raft_log_entry_t *entry, void *user_data) {
@@ -333,7 +382,14 @@ int raft_datastore_apply(const raft_log_entry_t *entry, void *user_data) {
     LOG_DEBUG("Raft KV: Applying entry index=%lu term=%lu type=%d",
               entry->index, entry->term, entry->type);
     
-    return raft_cmd_deserialize_and_execute(entry->data, entry->data_len, store);
+    int result = raft_cmd_deserialize_and_execute(entry->data, entry->data_len, store);
+    
+    // Update last applied index metric
+    if (result == 0) {
+        atomic_store_explicit(&store->metrics.log_index_applied, entry->index, memory_order_relaxed);
+    }
+    
+    return result;
 }
 
 int raft_datastore_snapshot(uint64_t last_included_index,
@@ -445,14 +501,11 @@ int raft_datastore_get(raft_datastore_t *store,
     *out_value = NULL;
     *out_len = 0;
     
-    // For linearizable reads, we need to ensure we're reading from leader
-    // and that our state is up-to-date
+    // For linearizable reads, ensure we're reading from leader
     if (!raft_is_leader(store->raft_state)) {
         LOG_DEBUG("Raft KV: Cannot serve read, not leader");
         return RESULT_ERR_INVALID;
     }
-    
-    store->total_gets++;
     
     pthread_rwlock_rdlock(&store->lock);
     
@@ -460,6 +513,11 @@ int raft_datastore_get(raft_datastore_t *store,
     
     if (!record) {
         pthread_rwlock_unlock(&store->lock);
+        
+        // ✅ INLINE METRIC UPDATES
+        atomic_fetch_add_explicit(&store->metrics.gets_completed, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&store->metrics.gets_notfound, 1, memory_order_relaxed);
+        
         LOG_DEBUG("Raft KV: GET %s - not found", key);
         return RESULT_ERR_NOTFOUND;
     }
@@ -475,6 +533,9 @@ int raft_datastore_get(raft_datastore_t *store,
     *out_len = record->value_len;
     
     pthread_rwlock_unlock(&store->lock);
+    
+    // ✅ INLINE METRIC UPDATE
+    atomic_fetch_add_explicit(&store->metrics.gets_completed, 1, memory_order_relaxed);
     
     LOG_DEBUG("Raft KV: GET %s - found (len=%zu)", key, *out_len);
     
@@ -544,7 +605,7 @@ size_t raft_datastore_list_keys(raft_datastore_t *store,
 }
 
 // ============================================================================
-// STATISTICS
+// STATISTICS (Deprecated API - Kept for Backward Compatibility)
 // ============================================================================
 
 void raft_datastore_get_stats(raft_datastore_t *store,
@@ -555,22 +616,15 @@ void raft_datastore_get_stats(raft_datastore_t *store,
     
     memset(out_stats, 0, sizeof(raft_datastore_stats_t));
     
-    pthread_rwlock_rdlock(&store->lock);
-    
-    out_stats->record_count = store->count;
+    // Use atomic accessors (new way)
+    out_stats->record_count = raft_datastore_get_record_count(store);
+    out_stats->total_bytes = raft_datastore_get_total_bytes(store);
     out_stats->capacity = store->capacity;
-    out_stats->total_sets = store->total_sets;
-    out_stats->total_gets = store->total_gets;
-    out_stats->total_unsets = store->total_unsets;
     
-    // Calculate total bytes
-    size_t total_bytes = 0;
-    for (size_t i = 0; i < store->capacity; i++) {
-        if (store->records[i].active) {
-            total_bytes += store->records[i].value_len;
-        }
-    }
-    out_stats->total_bytes = total_bytes;
+    raft_datastore_op_stats_t op_stats;
+    raft_datastore_get_op_stats(store, &op_stats);
     
-    pthread_rwlock_unlock(&store->lock);
+    out_stats->total_sets = op_stats.sets_completed;
+    out_stats->total_gets = op_stats.gets_completed;
+    out_stats->total_unsets = op_stats.deletes_completed;
 }

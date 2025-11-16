@@ -57,9 +57,15 @@ typedef struct node_state {
     metrics_t *metric_cluster_members_suspect;
     metrics_t *metric_cluster_members_dead;
     metrics_t *metric_uptime_seconds;
-    metrics_t *metric_raft_term;
-    metrics_t *metric_raft_state;
-    metrics_t *metric_raft_commit_index;
+    metrics_t *metric_datastore_size;
+    metrics_t *metric_datastore_bytes;
+    metrics_t *metric_datastore_sets;
+    metrics_t *metric_datastore_gets;
+    metrics_t *metric_datastore_unsets;
+    metrics_t *metric_raft_commit_lag;
+    metrics_t *metric_raft_followers_healthy;
+    metrics_t *metric_raft_followers_lagging;
+    metrics_t *metric_raft_elections_total;
     histogram_metric_t *histogram_raft_commit_latency;
 
     histogram_metric_t *histogram_gossip_rtt;

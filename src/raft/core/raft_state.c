@@ -57,7 +57,7 @@ static uint64_t get_last_log_term(raft_state_t *state) {
     return term;
 }
 
-static int is_log_up_to_date(raft_state_t *state, uint64_t candidate_last_index,
+void int is_log_up_to_date(raft_state_t *state, uint64_t candidate_last_index,
                              uint64_t candidate_last_term) {
     uint64_t our_last_index = get_last_log_index(state);
     uint64_t our_last_term = get_last_log_term(state);

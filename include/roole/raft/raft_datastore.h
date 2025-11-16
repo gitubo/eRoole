@@ -1,5 +1,5 @@
 // include/roole/raft/raft_datastore.h
-// Strongly consistent key-value store backed by Raft consensus
+// COMPLETE VERSION: All definitions included
 
 #ifndef ROOLE_RAFT_DATASTORE_H
 #define ROOLE_RAFT_DATASTORE_H
@@ -7,9 +7,10 @@
 #include "roole/raft/raft_state.h"
 #include "roole/core/common.h"
 #include <pthread.h>
+#include <stdatomic.h>
 
 // ============================================================================
-// CONFIGURATION
+// CONFIGURATION CONSTANTS
 // ============================================================================
 
 #define RAFT_KV_MAX_KEY_LEN 256
@@ -17,7 +18,7 @@
 #define RAFT_KV_MAX_RECORDS 10000
 
 // ============================================================================
-// COMMAND TYPES
+// COMMAND TYPES (for Raft log entries)
 // ============================================================================
 
 typedef enum {
@@ -27,7 +28,7 @@ typedef enum {
 } raft_command_type_t;
 
 // ============================================================================
-// KV RECORD
+// KV RECORD STRUCTURE
 // ============================================================================
 
 typedef struct raft_kv_record {
@@ -37,11 +38,33 @@ typedef struct raft_kv_record {
     uint64_t version;        // Monotonic version (log index)
     uint64_t created_at_ms;
     uint64_t updated_at_ms;
-    int active;              // 1 if in use
+    int active;              // 1 if in use, 0 if deleted/free
 } raft_kv_record_t;
 
 // ============================================================================
-// DATASTORE
+// ATOMIC METRICS STRUCTURE
+// Cache-line aligned for performance (64 bytes = 1 cache line)
+// ============================================================================
+
+typedef struct raft_datastore_metrics {
+    // Operational counters (lock-free, fast path)
+    _Atomic uint64_t record_count;      // Current number of active records
+    _Atomic uint64_t total_bytes;       // Total bytes stored in values
+    _Atomic uint64_t sets_completed;    // Total SET operations completed
+    _Atomic uint64_t gets_completed;    // Total GET operations completed
+    _Atomic uint64_t deletes_completed; // Total UNSET operations completed
+    
+    // Error tracking
+    _Atomic uint64_t sets_failed;       // Failed SETs (e.g., store full)
+    _Atomic uint64_t gets_notfound;     // GETs for non-existent keys
+    
+    // Raft integration metrics
+    _Atomic uint64_t log_index_applied; // Last log index applied to state machine
+    
+} __attribute__((aligned(64))) raft_datastore_metrics_t;
+
+// ============================================================================
+// DATASTORE STRUCTURE
 // ============================================================================
 
 typedef struct raft_datastore {
@@ -51,13 +74,10 @@ typedef struct raft_datastore {
     // Key-value storage
     raft_kv_record_t *records;
     size_t capacity;
-    size_t count;
     pthread_rwlock_t lock;
     
-    // Statistics
-    uint64_t total_sets;
-    uint64_t total_gets;
-    uint64_t total_unsets;
+    // ✅ NEW: Embedded atomic metrics (zero-copy access)
+    raft_datastore_metrics_t metrics;
     
     // Pending client requests (for linearizable reads)
     pthread_mutex_t pending_lock;
@@ -66,7 +86,53 @@ typedef struct raft_datastore {
 } raft_datastore_t;
 
 // ============================================================================
-// LIFECYCLE
+// METRICS ACCESS API (Lock-Free)
+// These are inline functions for zero overhead
+// ============================================================================
+
+/**
+ * Get current record count (atomic read)
+ * O(1) operation, no locks required
+ * Safe to call from any thread, including metrics scrape
+ */
+static inline uint64_t raft_datastore_get_record_count(const raft_datastore_t *store) {
+    if (!store) return 0;
+    return atomic_load_explicit(&store->metrics.record_count, memory_order_relaxed);
+}
+
+/**
+ * Get total bytes stored (atomic read)
+ */
+static inline uint64_t raft_datastore_get_total_bytes(const raft_datastore_t *store) {
+    if (!store) return 0;
+    return atomic_load_explicit(&store->metrics.total_bytes, memory_order_relaxed);
+}
+
+/**
+ * Get operation counters (atomic reads)
+ * Returns snapshot of all counters without locks
+ */
+typedef struct {
+    uint64_t sets_completed;
+    uint64_t gets_completed;
+    uint64_t deletes_completed;
+    uint64_t sets_failed;
+    uint64_t gets_notfound;
+} raft_datastore_op_stats_t;
+
+static inline void raft_datastore_get_op_stats(const raft_datastore_t *store,
+                                                raft_datastore_op_stats_t *out) {
+    if (!store || !out) return;
+    
+    out->sets_completed = atomic_load_explicit(&store->metrics.sets_completed, memory_order_relaxed);
+    out->gets_completed = atomic_load_explicit(&store->metrics.gets_completed, memory_order_relaxed);
+    out->deletes_completed = atomic_load_explicit(&store->metrics.deletes_completed, memory_order_relaxed);
+    out->sets_failed = atomic_load_explicit(&store->metrics.sets_failed, memory_order_relaxed);
+    out->gets_notfound = atomic_load_explicit(&store->metrics.gets_notfound, memory_order_relaxed);
+}
+
+// ============================================================================
+// LIFECYCLE API
 // ============================================================================
 
 /**
@@ -84,16 +150,16 @@ raft_datastore_t* raft_datastore_create(raft_state_t *raft_state, size_t capacit
 void raft_datastore_destroy(raft_datastore_t *store);
 
 // ============================================================================
-// OPERATIONS (Linearizable through Raft)
+// CLIENT OPERATIONS (Linearizable through Raft)
 // ============================================================================
 
 /**
  * Set key-value pair (strongly consistent write)
  * Submits command to Raft, waits for commit
  * @param store Datastore
- * @param key Key (null-terminated)
+ * @param key Key (null-terminated, max RAFT_KV_MAX_KEY_LEN)
  * @param value Value data
- * @param value_len Value length
+ * @param value_len Value length (max RAFT_KV_MAX_VALUE_SIZE)
  * @param timeout_ms Timeout for commit
  * @return 0 on success, error code on failure
  */
@@ -187,7 +253,7 @@ int raft_datastore_restore(const uint8_t *data,
                             void *user_data);
 
 // ============================================================================
-// COMMAND SERIALIZATION
+// COMMAND SERIALIZATION (Internal API)
 // ============================================================================
 
 /**
@@ -209,7 +275,9 @@ size_t raft_cmd_serialize_unset(const char *key,
                                  size_t buffer_size);
 
 /**
- * Deserialize command and execute
+ * Deserialize command and execute (internal)
+ * Called from raft_datastore_apply() callback
+ * Updates metrics inline (no callbacks)
  * @param data Command data
  * @param len Command length
  * @param store Datastore (for execution)
@@ -220,7 +288,7 @@ int raft_cmd_deserialize_and_execute(const uint8_t *data,
                                       raft_datastore_t *store);
 
 // ============================================================================
-// STATISTICS
+// STATISTICS (Deprecated - Use Atomic Accessors Instead)
 // ============================================================================
 
 typedef struct raft_datastore_stats {
@@ -232,6 +300,14 @@ typedef struct raft_datastore_stats {
     size_t total_bytes;
 } raft_datastore_stats_t;
 
+/**
+ * Get statistics (DEPRECATED: Use atomic accessors instead)
+ * This function exists for backward compatibility only
+ * New code should use:
+ *   - raft_datastore_get_record_count()
+ *   - raft_datastore_get_total_bytes()
+ *   - raft_datastore_get_op_stats()
+ */
 void raft_datastore_get_stats(raft_datastore_t *store,
                                raft_datastore_stats_t *out_stats);
 

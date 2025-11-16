@@ -5,6 +5,7 @@
 #define ROOLE_RAFT_STATE_H
 
 #include "roole/raft/raft_types.h"
+#include "roole/raft/raft_operational_metrics.h"
 #include "roole/cluster/cluster_view.h"
 #include "roole/rpc/rpc_client.h"
 #include "roole/rpc/rpc_handler.h"
@@ -91,6 +92,7 @@ typedef struct raft_state {
     
     // Statistics
     raft_stats_t stats;
+    raft_operational_metrics_t *op_metrics;
     
     // Shutdown flag
     volatile int shutdown;
