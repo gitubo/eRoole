@@ -363,22 +363,32 @@ int handle_raft_status(const uint8_t *request,
     
     node_state_t *state = (node_state_t*)user_context;
     
+    // Validate Raft is initialized
     if (!state->raft_state) {
-        LOG_ERROR("Raft state not initialized");
+        LOG_ERROR("Raft status: Raft not initialized");
         return RPC_STATUS_INTERNAL_ERROR;
     }
     
-    // Get Raft status
+    // Get Raft state
     int is_leader = raft_is_leader(state->raft_state);
     uint64_t term = raft_get_term(state->raft_state);
     uint64_t commit_index = raft_get_commit_index(state->raft_state);
     node_id_t leader_id = raft_get_leader(state->raft_state);
     
-    LOG_DEBUG("Raft STATUS: leader=%d term=%lu commit=%lu leader_id=%u",
-              is_leader, term, commit_index, leader_id);
+    // Get datastore stats (if available)
+    uint64_t record_count = 0;
+    if (state->raft_datastore) {
+        raft_datastore_stats_t ds_stats;
+        raft_datastore_get_stats(state->raft_datastore, &ds_stats);
+        record_count = ds_stats.record_count;
+    }
     
-    // Build response: [is_leader: 1][term: 8][commit_index: 8][leader_id: 2]
-    *response = (uint8_t*)safe_malloc(19);
+    LOG_DEBUG("Raft STATUS: leader=%d term=%lu commit=%lu leader_id=%u records=%lu",
+              is_leader, term, commit_index, leader_id, record_count);
+    
+    // Build response: 
+    // [is_leader:1][term:8][commit_index:8][leader_id:2][record_count:8]
+    *response = (uint8_t*)safe_malloc(27);
     if (!*response) {
         return RPC_STATUS_INTERNAL_ERROR;
     }
@@ -403,7 +413,12 @@ int handle_raft_status(const uint8_t *request,
     memcpy(ptr, &leader_net, 2);
     ptr += 2;
     
-    *response_len = 19;
+    // Record count (added field)
+    uint64_t records_net = htobe64(record_count);
+    memcpy(ptr, &records_net, 8);
+    ptr += 8;
+    
+    *response_len = 27;
     
     return RPC_STATUS_SUCCESS;
 }

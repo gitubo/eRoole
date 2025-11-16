@@ -231,7 +231,7 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr) {
     // Register datastore change callback
     // ========================================================================
     
-    datastore_t *store = node_state_get_datastore(state);
+    raft_datastore_t *store = node_state_get_datastore(state);
     if (store) {
         datastore_set_change_callback(store, on_datastore_changed, state);
         LOG_INFO("Datastore change callback registered");

@@ -5,7 +5,6 @@
 
 #include "roole/core/common.h"
 #include "roole/config/config.h"
-#include "roole/datastore/datastore.h"
 #include "roole/metrics/metrics.h"
 #include "roole/metrics/metrics_server.h"
 #include "roole/core/event_bus.h"
@@ -14,6 +13,7 @@
 #include "roole/node/peer_pool.h"
 #include "roole/node/node_capabilities.h"
 #include "roole/raft/raft_state.h"
+#include "roole/raft/raft_datastore.h"
 #include <pthread.h>
 
 // Node identity (immutable after initialization)
@@ -124,7 +124,7 @@ void node_state_destroy(node_state_t *state);
 // Accessors (read-only access to internal state)
 const node_identity_t* node_state_get_identity(const node_state_t *state);
 const node_capabilities_t* node_state_get_capabilities(const node_state_t *state);
-datastore_t* node_state_get_datastore(node_state_t *state);
+raft_datastore_t* node_state_get_datastore(node_state_t *state);
 peer_pool_t* node_state_get_peer_pool(node_state_t *state);
 cluster_view_t* node_state_get_cluster_view(node_state_t *state);
 metrics_registry_t* node_state_get_metrics(node_state_t *state);

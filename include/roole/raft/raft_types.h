@@ -30,7 +30,7 @@ typedef enum {
     RAFT_STATE_FOLLOWER = 0,
     RAFT_STATE_CANDIDATE = 1,
     RAFT_STATE_LEADER = 2
-} raft_state_t;
+} raft_node_state_t;
 
 // ============================================================================
 // LOG ENTRY
@@ -136,7 +136,7 @@ typedef struct raft_volatile_state {
     uint64_t commit_index;       // Index of highest log entry known to be committed
     uint64_t last_applied;       // Index of highest log entry applied to state machine
     
-    raft_state_t state;          // Current role (follower/candidate/leader)
+    raft_node_state_t state;          // Current role (follower/candidate/leader)
     node_id_t current_leader;    // Current leader (0 if unknown)
     
     // Election timing
@@ -252,6 +252,6 @@ typedef struct raft_stats {
 // HELPER FUNCTIONS
 // ============================================================================
 
-const char* raft_state_to_string(raft_state_t state);
+const char* raft_state_to_string(raft_node_state_t state);
 
 #endif // ROOLE_RAFT_TYPES_H

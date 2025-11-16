@@ -19,6 +19,8 @@ extern int log_contains_entry(raft_state_t *state, uint64_t index, uint64_t term
 extern void append_log_entries(raft_state_t *state, const raft_log_entry_t *entries,
                                size_t count, uint64_t prev_index);
 extern void become_follower(raft_state_t *state, uint64_t term);
+static void raft_free_append_entries_req(raft_append_entries_req_t *req);
+static void raft_free_install_snapshot_req(raft_install_snapshot_req_t *req);
 
 // ============================================================================
 // HANDLER: RequestVote RPC

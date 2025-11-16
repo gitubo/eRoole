@@ -114,7 +114,7 @@ if(BUILD_RAFT)
         src/raft/rpc/raft_serialization.c
         src/raft/rpc/raft_client.c
         src/raft/datastore/raft_datastore.c
-        src/raft/datastore/raft_snapshot.c
+        #src/raft/datastore/raft_snapshot.c
     )
     target_link_libraries(roole_raft roole_rpc roole_cluster roole_core)
 endif()

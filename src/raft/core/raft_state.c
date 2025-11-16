@@ -12,39 +12,7 @@
 #include <unistd.h>
 #include <time.h>
 
-// ============================================================================
-// INTERNAL STRUCTURE
-// ============================================================================
 
-struct raft_state {
-    node_id_t my_id;
-    cluster_view_t *cluster_view;
-    raft_config_t config;
-    
-    // State components
-    raft_persistent_state_t *persistent;
-    raft_volatile_state_t *volatile_state;
-    raft_leader_state_t *leader_state;
-    raft_snapshot_t *snapshot;
-    
-    // Callbacks
-    raft_callbacks_t callbacks;
-    
-    // RPC clients (for peer communication)
-    rpc_client_t *peer_clients[RAFT_MAX_PEERS];
-    pthread_mutex_t peers_lock;
-    
-    // Background threads
-    pthread_t election_timer_thread;
-    pthread_t heartbeat_thread;
-    pthread_t apply_thread;
-    
-    // Statistics
-    raft_stats_t stats;
-    
-    // Shutdown flag
-    volatile int shutdown;
-};
 
 // ============================================================================
 // HELPER: Random Election Timeout
@@ -681,7 +649,7 @@ int raft_wait_committed(raft_state_t *state, uint64_t index, int timeout_ms) {
 // HELPERS
 // ============================================================================
 
-const char* raft_state_to_string(raft_state_t state) {
+const char* raft_state_to_string(raft_node_state_t state) {
     switch (state) {
         case RAFT_STATE_FOLLOWER: return "FOLLOWER";
         case RAFT_STATE_CANDIDATE: return "CANDIDATE";
