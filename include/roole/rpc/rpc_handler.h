@@ -75,4 +75,49 @@ rpc_handler_fn rpc_handler_lookup(
  */
 void rpc_handler_registry_destroy(rpc_handler_registry_t *registry);
 
+/**
+ * Handler: Raft KV Set (linearizable write)
+ * Request: [key_len: 2][key][value_len: 4][value]
+ * Response: [success: 1][index: 8][term: 8]
+ */
+int handle_raft_kv_set(const uint8_t *request, size_t request_len,
+                       uint8_t **response, size_t *response_len,
+                       void *user_context);
+
+/**
+ * Handler: Raft KV Get (linearizable read)
+ * Request: [key_len: 2][key]
+ * Response: [found: 1][value_len: 4][value]
+ */
+int handle_raft_kv_get(const uint8_t *request, size_t request_len,
+                       uint8_t **response, size_t *response_len,
+                       void *user_context);
+
+/**
+ * Handler: Raft KV Unset (linearizable delete)
+ * Request: [key_len: 2][key]
+ * Response: [success: 1]
+ */
+int handle_raft_kv_unset(const uint8_t *request, size_t request_len,
+                         uint8_t **response, size_t *response_len,
+                         void *user_context);
+
+/**
+ * Handler: Raft KV List keys
+ * Request: empty
+ * Response: [count: 4][key1_len: 2][key1]...[keyN_len: 2][keyN]
+ */
+int handle_raft_kv_list(const uint8_t *request, size_t request_len,
+                        uint8_t **response, size_t *response_len,
+                        void *user_context);
+
+/**
+ * Handler: Raft cluster status
+ * Request: empty
+ * Response: [is_leader: 1][term: 8][commit_index: 8][leader_id: 2]
+ */
+int handle_raft_status(const uint8_t *request, size_t request_len,
+                       uint8_t **response, size_t *response_len,
+                       void *user_context);
+                       
 #endif // ROOLE_RPC_HANDLER_H

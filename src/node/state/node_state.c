@@ -64,6 +64,103 @@ static void* cleanup_thread_fn(void *arg) {
 }
 
 // ============================================================================
+// RAFT UPDATE THREAD
+// ============================================================================
+
+static void* raft_peer_sync_thread_fn(void *arg) {
+    node_state_t *state = (node_state_t*)arg;
+    
+    logger_push_component("raft:peers");
+    LOG_INFO("Raft peer sync thread started");
+    
+    // Track known peers
+    node_id_t known_peers[MAX_CLUSTER_NODES] = {0};
+    size_t known_peer_count = 0;
+    
+    while (!state->shutdown_flag) {
+        if (!state->raft_state) {
+            sleep(1);
+            continue;
+        }
+        
+        // Get current cluster members from cluster_view
+        pthread_rwlock_rdlock(&state->cluster_view->lock);
+        
+        node_id_t current_peers[MAX_CLUSTER_NODES];
+        size_t current_peer_count = 0;
+        
+        for (size_t i = 0; i < state->cluster_view->count; i++) {
+            cluster_member_t *m = &state->cluster_view->members[i];
+            
+            // Only track ALIVE peers that are not ourselves
+            if (m->node_id != state->identity.node_id && 
+                m->status == NODE_STATUS_ALIVE) {
+                current_peers[current_peer_count++] = m->node_id;
+            }
+        }
+        
+        pthread_rwlock_unlock(&state->cluster_view->lock);
+        
+        // Detect new peers (in current but not in known)
+        for (size_t i = 0; i < current_peer_count; i++) {
+            node_id_t peer_id = current_peers[i];
+            int is_new = 1;
+            
+            for (size_t j = 0; j < known_peer_count; j++) {
+                if (known_peers[j] == peer_id) {
+                    is_new = 0;
+                    break;
+                }
+            }
+            
+            if (is_new) {
+                // New peer discovered - add to Raft
+                cluster_member_t *member = cluster_view_get(state->cluster_view, peer_id);
+                if (member) {
+                    LOG_INFO("Raft: Discovered new peer %u (%s:%u)",
+                            peer_id, member->ip_address, member->data_port);
+                    
+                    raft_add_peer(state->raft_state, peer_id,
+                                 member->ip_address, member->data_port);
+                    
+                    cluster_view_release(state->cluster_view);
+                }
+            }
+        }
+        
+        // Detect removed peers (in known but not in current)
+        for (size_t i = 0; i < known_peer_count; i++) {
+            node_id_t peer_id = known_peers[i];
+            int still_exists = 0;
+            
+            for (size_t j = 0; j < current_peer_count; j++) {
+                if (current_peers[j] == peer_id) {
+                    still_exists = 1;
+                    break;
+                }
+            }
+            
+            if (!still_exists) {
+                // Peer removed - remove from Raft
+                LOG_INFO("Raft: Peer %u left cluster", peer_id);
+                raft_remove_peer(state->raft_state, peer_id);
+            }
+        }
+        
+        // Update known peers list
+        memcpy(known_peers, current_peers, current_peer_count * sizeof(node_id_t));
+        known_peer_count = current_peer_count;
+        
+        // Check every 5 seconds
+        sleep(5);
+    }
+    
+    LOG_INFO("Raft peer sync thread stopped");
+    logger_pop_component();
+    return NULL;
+}
+
+// ============================================================================
 // METRICS UPDATE THREAD
 // ============================================================================
 
@@ -150,6 +247,50 @@ result_t node_state_init(node_state_t **out_state, const roole_config_t *config)
     
     LOG_INFO("Datastore initialized (capacity: %d records)", MAX_RECORDS);
     
+    // ========================================================================
+    // Initialize Raft Consensus
+    // ========================================================================
+
+    LOG_INFO("Initializing Raft consensus...");
+
+    // Create Raft callbacks for datastore integration
+    raft_callbacks_t raft_callbacks = {
+        .on_apply = raft_datastore_apply,
+        .on_snapshot_create = raft_datastore_snapshot,
+        .on_snapshot_restore = raft_datastore_restore,
+        .user_data = NULL  // Will be set to raft_datastore below
+    };
+
+    // Create Raft state machine
+    raft_config_t raft_config = raft_default_config();
+    state->raft_state = raft_state_create(
+        config->node_id,
+        state->cluster_view,  // Reuse existing cluster view
+        &raft_config,
+        &raft_callbacks
+    );
+
+    if (!state->raft_state) {
+        LOG_ERROR("Failed to create Raft state");
+        // ... cleanup ...
+        return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to create Raft");
+    }
+
+    // Create Raft-backed datastore
+    state->raft_datastore = raft_datastore_create(state->raft_state, MAX_RECORDS);
+
+    if (!state->raft_datastore) {
+        LOG_ERROR("Failed to create Raft datastore");
+        raft_state_destroy(state->raft_state);
+        // ... cleanup ...
+        return RESULT_ERROR(RESULT_ERR_NOMEM, "Failed to create Raft datastore");
+    }
+
+    // Update callback user_data
+    raft_callbacks.user_data = state->raft_datastore;
+
+    LOG_INFO("Raft consensus initialized successfully");
+
     // ========================================================================
     // 3. Initialize Peer Pool
     // ========================================================================
@@ -291,6 +432,30 @@ result_t node_state_start(node_state_t *state) {
             return RESULT_ERROR(RESULT_ERR_INVALID, "Failed to start metrics thread");
         }
     }
+
+    // ========================================================================
+    // Start Raft State Machine
+    // ========================================================================
+
+    if (state->raft_state) {
+        LOG_INFO("Starting Raft state machine...");
+        
+        if (raft_state_start(state->raft_state) != 0) {
+            LOG_ERROR("Failed to start Raft state machine");
+            return RESULT_ERROR(RESULT_ERR_INVALID, "Raft start failed");
+        }
+        
+        LOG_INFO("Raft state machine started");
+    }
+
+    if (state->raft_state) {
+        if (pthread_create(&state->raft_peer_sync_thread, NULL,
+                          raft_peer_sync_thread_fn, state) != 0) {
+            LOG_ERROR("Failed to create Raft peer sync thread");
+            return RESULT_ERROR(RESULT_ERR_INVALID, "Raft peer sync failed");
+        }
+        LOG_INFO("Raft peer sync thread started");
+    }
     
     LOG_INFO("Node services started successfully");
     return RESULT_SUCCESS();
@@ -371,7 +536,12 @@ void node_state_shutdown(node_state_t *state) {
     if (state->metrics_update_thread) {
         pthread_join(state->metrics_update_thread, NULL);
     }
-    
+
+    // Stop RAFT update thread
+    if (state->raft_peer_sync_thread) {
+        pthread_join(state->raft_peer_sync_thread, NULL);
+    }
+
     LOG_INFO("Node shutdown complete");
 }
 

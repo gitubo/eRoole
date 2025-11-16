@@ -137,6 +137,30 @@ int node_metrics_init(node_state_t *state, const char *metrics_addr) {
         "Total number of UNSET operations",
         3, labels
     );
+
+    // ========================================================================
+    // RAFT METRICS
+    // ========================================================================
+    state->metric_raft_term = metrics_get_or_create_gauge(
+        state->metrics_registry,
+        "raft_term",
+        "Current Raft term",
+        3, labels
+    );
+
+    state->metric_raft_state = metrics_get_or_create_gauge(
+        state->metrics_registry,
+        "raft_state",
+        "Raft role (0=follower, 1=candidate, 2=leader)",
+        3, labels
+    );
+
+    state->metric_raft_commit_index = metrics_get_or_create_gauge(
+        state->metrics_registry,
+        "raft_commit_index",
+        "Raft commit index",
+        3, labels
+    );
     
     // ========================================================================
     // CLUSTER METRICS
@@ -330,6 +354,16 @@ void node_metrics_update_periodic(node_state_t *state) {
             metrics_gauge_set(state->metric_datastore_bytes, 
                              (double)stats.total_value_bytes);
         }
+    }
+
+    // Update RAFT metrics
+    if (state->raft_state) {
+        metrics_gauge_set(state->metric_raft_term, 
+                        (double)raft_get_term(state->raft_state));
+        metrics_gauge_set(state->metric_raft_state,
+                        (double)raft_get_state(state->raft_state));
+        metrics_gauge_set(state->metric_raft_commit_index,
+                        (double)raft_get_commit_index(state->raft_state));
     }
     
     // Update cluster metrics

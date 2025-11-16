@@ -37,31 +37,31 @@ rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
     
     if (caps->has_ingress) {
         LOG_INFO("Registering INGRESS handlers (client-facing datastore ops)");
-        
-        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_SET,
-                                handle_datastore_set, state) != 0) {
-            LOG_ERROR("Failed to register DATASTORE_SET handler");
+
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_SET,
+                                handle_raft_kv_set, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_SET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_GET,
-                                handle_datastore_get, state) != 0) {
-            LOG_ERROR("Failed to register DATASTORE_GET handler");
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_GET,
+                                handle_raft_kv_get, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_GET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_UNSET,
-                                handle_datastore_unset, state) != 0) {
-            LOG_ERROR("Failed to register DATASTORE_UNSET handler");
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_UNSET,
+                                handle_raft_kv_unset, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_UNSET handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
         
-        if (rpc_handler_register(registry, FUNC_ID_DATASTORE_LIST,
-                                handle_datastore_list_keys, state) != 0) {
-            LOG_ERROR("Failed to register DATASTORE_LIST handler");
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_LIST,
+                                handle_raft_kv_list, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_LIST handler");
             rpc_handler_registry_destroy(registry);
             return NULL;
         }
@@ -77,14 +77,77 @@ rpc_handler_registry_t* node_build_handler_registry(node_state_t *state) {
     
     LOG_INFO("Registering DATA handlers (peer-to-peer datastore sync)");
     
-    if (rpc_handler_register(registry, FUNC_ID_DATASTORE_SYNC,
-                            handle_datastore_sync, state) != 0) {
-        LOG_ERROR("Failed to register DATASTORE_SYNC handler");
+    if (rpc_handler_register(registry, FUNC_ID_RAFT_STATUS,
+                            handle_rafk_kv_status, state) != 0) {
+        LOG_ERROR("Failed to register RAFT_STATUS handler");
         rpc_handler_registry_destroy(registry);
         return NULL;
     }
+
+    LOG_INFO("Registered 1 DATA handler (SYNC)");    
+
+    // ========================================================================
+    // Register RAFT CONSENSUS handlers (peer-to-peer, always present)
+    // ========================================================================
     
-    LOG_INFO("Registered 1 DATA handler (SYNC)");
+    if (state->raft_state) {
+        LOG_INFO("Registering Raft consensus handlers (peer-to-peer)");
+        
+        if (raft_register_handlers(registry, state->raft_state) != 0) {
+            LOG_ERROR("Failed to register Raft consensus handlers");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        LOG_INFO("Registered 3 Raft consensus handlers (RequestVote, AppendEntries, InstallSnapshot)");
+    }
+    
+    // ========================================================================
+    // Register RAFT DATASTORE handlers (ingress only, if has_ingress)
+    // ========================================================================
+    
+    if (caps->has_ingress && state->raft_datastore) {
+        LOG_INFO("Registering Raft datastore handlers (client-facing)");
+        
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_SET,
+                                handle_raft_kv_set, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_SET handler");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_GET,
+                                handle_raft_kv_get, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_GET handler");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_UNSET,
+                                handle_raft_kv_unset, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_UNSET handler");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_KV_LIST,
+                                handle_raft_kv_list, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_KV_LIST handler");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        if (rpc_handler_register(registry, FUNC_ID_RAFT_STATUS,
+                                handle_raft_status, state) != 0) {
+            LOG_ERROR("Failed to register RAFT_STATUS handler");
+            rpc_handler_registry_destroy(registry);
+            return NULL;
+        }
+        
+        LOG_INFO("Registered 5 Raft datastore handlers (SET, GET, UNSET, LIST, STATUS)");
+    } else if (state->raft_datastore) {
+        LOG_INFO("Skipping Raft datastore ingress handlers (no ingress capability)");
+    }
     
     // ========================================================================
     // Summary

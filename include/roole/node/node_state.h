@@ -13,6 +13,7 @@
 #include "roole/cluster/membership.h"
 #include "roole/node/peer_pool.h"
 #include "roole/node/node_capabilities.h"
+#include "roole/raft/raft_state.h"
 #include <pthread.h>
 
 // Node identity (immutable after initialization)
@@ -33,9 +34,6 @@ typedef struct node_state {
     node_identity_t identity;
     node_capabilities_t capabilities;
     
-    // Core subsystem: DATASTORE ONLY
-    datastore_t *datastore;
-    
     // Cluster membership (owns the view)
     cluster_view_t *cluster_view;
     membership_handle_t *membership;
@@ -47,19 +45,23 @@ typedef struct node_state {
     metrics_registry_t *metrics_registry;
     metrics_server_t *metrics_server;
     event_bus_t *event_bus;
+
+    // Raft consensus 
+    raft_state_t *raft_state;              // Raft state machine
+    raft_datastore_t *raft_datastore;      // Strongly consistent KV store
+    pthread_t raft_peer_sync_thread;       // Peer discovery thread
     
     // Metrics references (for fast access)
     metrics_t *metric_cluster_members_total;
     metrics_t *metric_cluster_members_active;
     metrics_t *metric_cluster_members_suspect;
     metrics_t *metric_cluster_members_dead;
-    metrics_t *metric_datastore_size;
-    metrics_t *metric_datastore_bytes;
-    metrics_t *metric_datastore_sets;
-    metrics_t *metric_datastore_gets;
-    metrics_t *metric_datastore_unsets;
     metrics_t *metric_uptime_seconds;
-    
+    metrics_t *metric_raft_term;
+    metrics_t *metric_raft_state;
+    metrics_t *metric_raft_commit_index;
+    histogram_metric_t *histogram_raft_commit_latency;
+
     histogram_metric_t *histogram_gossip_rtt;
     histogram_metric_t *histogram_datastore_op_duration;
     

@@ -21,7 +21,7 @@ option(BUILD_LOGGER              "Build roole_logger" ON)
 option(BUILD_CLUSTER             "Build roole_cluster" ON)
 option(BUILD_GOSSIP              "Build roole_gossip" ON)
 option(BUILD_RPC                 "Build roole_rpc" ON)
-option(BUILD_DATASTORE           "Build roole_datastore" ON)
+option(BUILD_RAFT                "Build roole_raft" ON)
 option(BUILD_METRICS             "Build roole_metrics" ON)
 option(BUILD_NODE                "Build roole_node" ON)
 option(BUILD_EXECUTABLES         "Build executables" ON)
@@ -99,14 +99,6 @@ if(BUILD_RPC)
     target_link_libraries(roole_rpc roole_transport roole_core)
 endif()
 
-if(BUILD_DATASTORE)
-    add_library(roole_datastore STATIC 
-        src/datastore/datastore_serialization.c
-        src/datastore/datastore.c 
-    )
-    target_link_libraries(roole_datastore roole_core)
-endif()
-
 if(BUILD_METRICS)
     add_library(roole_metrics STATIC 
         src/metrics/metrics.c 
@@ -115,19 +107,40 @@ if(BUILD_METRICS)
     target_link_libraries(roole_metrics)
 endif()
 
+if(BUILD_RAFT)
+    add_library(roole_raft STATIC
+        src/raft/core/raft_state.c
+        src/raft/rpc/raft_handlers.c
+        src/raft/rpc/raft_serialization.c
+        src/raft/rpc/raft_client.c
+        src/raft/datastore/raft_datastore.c
+        src/raft/datastore/raft_snapshot.c
+    )
+    target_link_libraries(roole_raft roole_rpc roole_cluster roole_core)
+endif()
 
 if(BUILD_NODE)
     add_library(roole_node STATIC
         src/node/state/node_state.c
         src/node/peers/peer_pool.c
         src/node/handlers/handler_registry.c
-        src/node/handlers/datastore_handlers.c
+        src/node/handlers/raft_datastore_handlers.c
         src/node/node_capabilities.c
         src/node/node_metrics.c
         src/node/node_rpc.c
 
     )
-    target_link_libraries(roole_node PUBLIC roole_rpc roole_gossip roole_cluster roole_datastore roole_metrics roole_core roole_config PRIVATE pthread m)
+    target_link_libraries(roole_node PUBLIC 
+        roole_raft
+        roole_rpc 
+        roole_gossip 
+        roole_cluster 
+        roole_raft 
+        roole_metrics 
+        roole_core 
+        roole_config 
+        PRIVATE pthread m
+    )
 endif()
 
 # ------------------------------------------------------------------
@@ -199,7 +212,7 @@ message(STATUS "  BUILD_CORE                 = ${BUILD_CORE}")
 message(STATUS "  BUILD_CLUSTER              = ${BUILD_CLUSTER}")
 message(STATUS "  BUILD_GOSSIP               = ${BUILD_GOSSIP}")
 message(STATUS "  BUILD_RPC                  = ${BUILD_RPC}")
-message(STATUS "  BUILD_DATASTORE            = ${BUILD_DATASTORE}")
+message(STATUS "  BUILD_RAFT                 = ${BUILD_RAFT}")
 message(STATUS "  BUILD_NODE                 = ${BUILD_NODE}")
 message(STATUS "  BUILD_EXECUTABLES          = ${BUILD_EXECUTABLES}")
 message(STATUS "  BUILD_TESTS                = ${BUILD_TESTS}")

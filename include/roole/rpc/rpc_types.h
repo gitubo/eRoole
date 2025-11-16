@@ -45,13 +45,18 @@ typedef enum {
     FUNC_ID_WORKER_REGISTRATION = 0x24,
     FUNC_ID_SUBMIT_MESSAGE = 0x25,
     FUNC_ID_PROCESS_MESSAGE = 0x26,
+
+    // Raft consensus protocol (Peer-to-peer)
+    FUNC_ID_RAFT_REQUEST_VOTE   = 0x40,
+    FUNC_ID_RAFT_APPEND_ENTRIES = 0x41,
+    FUNC_ID_RAFT_INSTALL_SNAPSHOT = 0x42,
     
-    // Datastore management
-    FUNC_ID_DATASTORE_SET = 0x30,
-    FUNC_ID_DATASTORE_GET = 0x31,
-    FUNC_ID_DATASTORE_UNSET = 0x32,
-    FUNC_ID_DATASTORE_LIST = 0x33,
-    FUNC_ID_DATASTORE_SYNC = 0x34,
+    // Raft datastore client operations (Ingress only)
+    FUNC_ID_RAFT_KV_SET = 0x50,
+    FUNC_ID_RAFT_KV_GET = 0x51,
+    FUNC_ID_RAFT_KV_UNSET = 0x52,
+    FUNC_ID_RAFT_KV_LIST = 0x53,
+    FUNC_ID_RAFT_STATUS = 0x54
 } rpc_func_id_t;
 
 // RPC header structure
