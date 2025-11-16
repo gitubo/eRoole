@@ -255,4 +255,75 @@ int raft_is_leader(raft_state_t *state);
  */
 void raft_dump_state(raft_state_t *state, const char *label);
 
+// ============================================================================
+// INTERNAL HELPERS (for RPC handlers)
+// ============================================================================
+
+/**
+ * Reset election timer
+ * Should be called when receiving valid AppendEntries or granting vote
+ * @param state Raft state
+ */
+void raft_reset_election_timer(raft_state_t *state);
+
+/**
+ * Check if candidate's log is at least as up-to-date as ours
+ * Used in RequestVote RPC handling (§5.4.1)
+ * @param state Raft state
+ * @param candidate_last_index Candidate's last log index
+ * @param candidate_last_term Candidate's last log term
+ * @return 1 if candidate's log is up-to-date, 0 otherwise
+ */
+int raft_is_log_up_to_date(raft_state_t *state, 
+                            uint64_t candidate_last_index,
+                            uint64_t candidate_last_term);
+
+/**
+ * Check if log contains entry at given index with given term
+ * Used in AppendEntries RPC handling (§5.3)
+ * @param state Raft state
+ * @param index Log index to check
+ * @param term Expected term
+ * @return 1 if log contains matching entry, 0 otherwise
+ */
+int raft_log_contains_entry(raft_state_t *state, 
+                             uint64_t index, 
+                             uint64_t term);
+
+/**
+ * Append entries to log, truncating conflicts
+ * Used in AppendEntries RPC handling (§5.3)
+ * @param state Raft state
+ * @param entries Entries to append
+ * @param count Number of entries
+ * @param prev_index Index immediately before new entries
+ * @return 0 on success, -1 on error
+ */
+int raft_append_log_entries(raft_state_t *state, 
+                             const raft_log_entry_t *entries,
+                             size_t count, 
+                             uint64_t prev_index);
+
+/**
+ * Transition to follower state
+ * Used when discovering higher term
+ * @param state Raft state
+ * @param term Term to transition to
+ */
+void raft_become_follower(raft_state_t *state, uint64_t term);
+
+/**
+ * Get last log index
+ * @param state Raft state
+ * @return Last log index (or snapshot_last_index if log is empty)
+ */
+uint64_t raft_get_last_log_index(raft_state_t *state);
+
+/**
+ * Get last log term
+ * @param state Raft state
+ * @return Last log term (or snapshot_last_term if log is empty)
+ */
+uint64_t raft_get_last_log_term(raft_state_t *state);
+
 #endif // ROOLE_RAFT_STATE_H

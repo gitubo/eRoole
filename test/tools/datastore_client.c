@@ -283,7 +283,7 @@ static int handle_set(rpc_client_t *client, const char *key, const char *value) 
     uint8_t *response = NULL;
     size_t response_len = 0;
     
-    int status = rpc_client_call(client, FUNC_ID_DATASTORE_SET,
+    int status = rpc_client_call(client, FUNC_ID_RAFT_KV_SET,
                                  request, request_len,
                                  &response, &response_len, 5000);
     
@@ -314,7 +314,7 @@ static int handle_get(rpc_client_t *client, const char *key) {
     uint8_t *response = NULL;
     size_t response_len = 0;
     
-    int status = rpc_client_call(client, FUNC_ID_DATASTORE_GET,
+    int status = rpc_client_call(client, FUNC_ID_RAFT_KV_GET,
                                  request, request_len,
                                  &response, &response_len, 5000);
     
@@ -345,7 +345,7 @@ static int handle_unset(rpc_client_t *client, const char *key) {
     uint8_t *response = NULL;
     size_t response_len = 0;
     
-    int status = rpc_client_call(client, FUNC_ID_DATASTORE_UNSET,
+    int status = rpc_client_call(client, FUNC_ID_RAFT_KV_UNSET,
                                  request, request_len,
                                  &response, &response_len, 5000);
     
@@ -372,7 +372,7 @@ static int handle_list(rpc_client_t *client) {
     uint8_t *response = NULL;
     size_t response_len = 0;
     
-    int status = rpc_client_call(client, FUNC_ID_DATASTORE_LIST,
+    int status = rpc_client_call(client, FUNC_ID_RAFT_KV_LIST,
                                  request, request_len,
                                  &response, &response_len, 5000);
     

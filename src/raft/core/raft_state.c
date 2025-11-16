@@ -25,75 +25,138 @@ static uint64_t random_election_timeout(const raft_config_t *config) {
 }
 
 // ============================================================================
-// HELPER: Log Operations
+// HELPER: Get Last Log Index
 // ============================================================================
 
-static uint64_t get_last_log_index(raft_state_t *state) {
+uint64_t raft_get_last_log_index(raft_state_t *state) {
+    if (!state) return 0;
+    
     pthread_rwlock_rdlock(&state->persistent->lock);
     
     if (state->persistent->log_count > 0) {
+        // Return index of last log entry
         uint64_t idx = state->persistent->log[state->persistent->log_count - 1].index;
         pthread_rwlock_unlock(&state->persistent->lock);
         return idx;
     }
     
-    // If no entries, return snapshot last index
+    // If log is empty, return snapshot last index
     uint64_t idx = state->persistent->snapshot_last_index;
     pthread_rwlock_unlock(&state->persistent->lock);
     return idx;
 }
 
-static uint64_t get_last_log_term(raft_state_t *state) {
+// ============================================================================
+// HELPER: Get Last Log Term
+// ============================================================================
+
+uint64_t raft_get_last_log_term(raft_state_t *state) {
+    if (!state) return 0;
+    
     pthread_rwlock_rdlock(&state->persistent->lock);
     
     if (state->persistent->log_count > 0) {
+        // Return term of last log entry
         uint64_t term = state->persistent->log[state->persistent->log_count - 1].term;
         pthread_rwlock_unlock(&state->persistent->lock);
         return term;
     }
     
+    // If log is empty, return snapshot last term
     uint64_t term = state->persistent->snapshot_last_term;
     pthread_rwlock_unlock(&state->persistent->lock);
     return term;
 }
 
-void int is_log_up_to_date(raft_state_t *state, uint64_t candidate_last_index,
-                             uint64_t candidate_last_term) {
-    uint64_t our_last_index = get_last_log_index(state);
-    uint64_t our_last_term = get_last_log_term(state);
+int raft_is_log_up_to_date(raft_state_t *state, 
+                            uint64_t candidate_last_index,
+                            uint64_t candidate_last_term) {
+    if (!state) return 0;
     
-    // Candidate's log is more up-to-date if last log term is greater,
-    // or terms are equal but index is >= ours
+    uint64_t our_last_index = raft_get_last_log_index(state);
+    uint64_t our_last_term = raft_get_last_log_term(state);
+    
+    // Raft §5.4.1: Raft determines which of two logs is more up-to-date
+    // by comparing the index and term of the last entries in the logs.
+    // If the logs have last entries with different terms, then the log with
+    // the later term is more up-to-date. If the logs end with the same term,
+    // then whichever log is longer is more up-to-date.
+    
     if (candidate_last_term > our_last_term) {
+        LOG_DEBUG("Raft: Candidate log is more up-to-date (term %lu > %lu)",
+                  candidate_last_term, our_last_term);
         return 1;
     }
+    
     if (candidate_last_term == our_last_term && candidate_last_index >= our_last_index) {
+        LOG_DEBUG("Raft: Candidate log is up-to-date (same term, index %lu >= %lu)",
+                  candidate_last_index, our_last_index);
         return 1;
     }
+    
+    LOG_DEBUG("Raft: Candidate log is NOT up-to-date (term=%lu/%lu, index=%lu/%lu)",
+              candidate_last_term, our_last_term, candidate_last_index, our_last_index);
     return 0;
+}
+
+// ============================================================================
+// HELPER: Reset Election Timer
+// ============================================================================
+
+void raft_reset_election_timer(raft_state_t *state) {
+    if (!state) return;
+    
+    pthread_mutex_lock(&state->volatile_state->lock);
+    state->volatile_state->last_heartbeat_ms = time_now_ms();
+    state->volatile_state->election_timeout_ms = random_election_timeout(&state->config);
+    pthread_mutex_unlock(&state->volatile_state->lock);
+    
+    LOG_DEBUG("Raft: Election timer reset (timeout=%lu ms)", 
+              state->volatile_state->election_timeout_ms);
 }
 
 // ============================================================================
 // HELPER: State Transitions
 // ============================================================================
 
-static void become_follower(raft_state_t *state, uint64_t term) {
+void raft_become_follower(raft_state_t *state, uint64_t term) {
+    if (!state) return;
+    
     pthread_mutex_lock(&state->volatile_state->lock);
     
-    if (state->volatile_state->state != RAFT_STATE_FOLLOWER) {
-        LOG_INFO("Raft: Becoming FOLLOWER (term=%lu)", term);
+    int was_follower = (state->volatile_state->state == RAFT_STATE_FOLLOWER);
+    
+    if (!was_follower) {
+        LOG_INFO("Raft: Becoming FOLLOWER (term=%lu, was %s)",
+                 term, raft_state_to_string(state->volatile_state->state));
+        
+        // Update statistics
+        pthread_mutex_lock(&state->stats.lock);
         state->stats.became_follower++;
+        pthread_mutex_unlock(&state->stats.lock);
+        
+        // Update operational metrics (if leader stepping down)
+        if (state->volatile_state->state == RAFT_STATE_LEADER && state->op_metrics) {
+            raft_metrics_set_leader(state->op_metrics, 0);
+        }
     }
     
+    // Update volatile state
     state->volatile_state->state = RAFT_STATE_FOLLOWER;
     state->volatile_state->current_leader = 0;
     
+    pthread_mutex_unlock(&state->volatile_state->lock);
+    
+    // Update persistent state
     pthread_rwlock_wrlock(&state->persistent->lock);
     state->persistent->current_term = term;
     state->persistent->voted_for = 0;
     pthread_rwlock_unlock(&state->persistent->lock);
     
-    pthread_mutex_unlock(&state->volatile_state->lock);
+    // Reset election timer to avoid immediate re-election
+    raft_reset_election_timer(state);
+    
+    LOG_DEBUG("Raft: Now FOLLOWER (term=%lu)", term);
 }
 
 static void become_candidate(raft_state_t *state) {
@@ -118,7 +181,7 @@ static void become_leader(raft_state_t *state) {
     // Initialize leader state
     pthread_mutex_lock(&state->leader_state->lock);
     
-    uint64_t last_log_idx = get_last_log_index(state);
+    uint64_t last_log_idx = raft_get_last_log_index(state);
     
     for (size_t i = 0; i < state->leader_state->peer_count; i++) {
         state->leader_state->next_index[i] = last_log_idx + 1;
@@ -175,8 +238,8 @@ static void start_election(raft_state_t *state) {
     uint64_t term = state->persistent->current_term;
     pthread_rwlock_unlock(&state->persistent->lock);
     
-    uint64_t last_log_index = get_last_log_index(state);
-    uint64_t last_log_term = get_last_log_term(state);
+    uint64_t last_log_index = raft_get_last_log_index(state);
+    uint64_t last_log_term = raft_get_last_log_term(state);
     
     // Reset election timer
     reset_election_timer(state);
@@ -233,7 +296,7 @@ static void start_election(raft_state_t *state) {
         // If peer has higher term, step down
         if (resp.term > term) {
             LOG_INFO("Raft: Peer %u has higher term %lu, stepping down", peer_id, resp.term);
-            become_follower(state, resp.term);
+            raft_become_follower(state, resp.term);
             break;
         }
         
@@ -331,7 +394,7 @@ static void send_append_entries_to_peer(raft_state_t *state, size_t peer_idx) {
     // Process response
     if (resp.term > term) {
         LOG_INFO("Raft: Peer %u has higher term, stepping down", peer_id);
-        become_follower(state, resp.term);
+        raft_become_follower(state, resp.term);
         return;
     }
     
@@ -596,7 +659,7 @@ int raft_submit_command(raft_state_t *state,
     }
     
     uint64_t term = state->persistent->current_term;
-    uint64_t index = get_last_log_index(state) + 1;
+    uint64_t index = raft_get_last_log_index(state) + 1;
     
     raft_log_entry_t *entry = &state->persistent->log[state->persistent->log_count];
     entry->term = term;
@@ -702,7 +765,7 @@ int raft_add_peer(raft_state_t *state,
     
     // Initialize leader state for this peer
     pthread_mutex_lock(&state->leader_state->lock);
-    uint64_t next_idx = get_last_log_index(state) + 1;
+    uint64_t next_idx = raft_get_last_log_index(state) + 1;
     state->leader_state->next_index[idx] = next_idx;
     state->leader_state->match_index[idx] = 0;
     pthread_mutex_unlock(&state->leader_state->lock);
@@ -835,4 +898,191 @@ void raft_get_stats(raft_state_t *state, raft_stats_t *out_stats) {
     pthread_mutex_lock(&state->stats.lock);
     *out_stats = state->stats;
     pthread_mutex_unlock(&state->stats.lock);
+}
+
+// ============================================================================
+// HELPER: Check if Log Contains Entry at Index with Term
+// ============================================================================
+
+int raft_log_contains_entry(raft_state_t *state, uint64_t index, uint64_t term) {
+    if (!state) return 0;
+    
+    pthread_rwlock_rdlock(&state->persistent->lock);
+    
+    // Special case: index 0 always matches (represents "before first entry")
+    // This is used when prev_log_index = 0 in AppendEntries
+    if (index == 0) {
+        pthread_rwlock_unlock(&state->persistent->lock);
+        return 1;
+    }
+    
+    // Check if index is in snapshot range
+    // If we have a snapshot covering this index, check if term matches
+    if (index <= state->persistent->snapshot_last_index) {
+        if (index == state->persistent->snapshot_last_index) {
+            int matches = (term == state->persistent->snapshot_last_term);
+            pthread_rwlock_unlock(&state->persistent->lock);
+            LOG_DEBUG("Raft: Entry at index %lu is in snapshot (term %s)",
+                      index, matches ? "matches" : "differs");
+            return matches;
+        }
+        
+        // Index is before snapshot boundary - we don't have this entry anymore
+        // In practice, leader shouldn't ask about entries before snapshot
+        pthread_rwlock_unlock(&state->persistent->lock);
+        LOG_WARN("Raft: Entry at index %lu is before snapshot boundary (%lu)",
+                 index, state->persistent->snapshot_last_index);
+        return 0;
+    }
+    
+    // Entry should be in log
+    // Convert global index to log array index
+    // Log array starts at (snapshot_last_index + 1)
+    uint64_t first_log_index = state->persistent->snapshot_last_index + 1;
+    
+    if (index < first_log_index) {
+        // This shouldn't happen (already handled above), but be defensive
+        pthread_rwlock_unlock(&state->persistent->lock);
+        return 0;
+    }
+    
+    size_t log_idx = index - first_log_index;
+    
+    // Check if index is beyond our log
+    if (log_idx >= state->persistent->log_count) {
+        pthread_rwlock_unlock(&state->persistent->lock);
+        LOG_DEBUG("Raft: Entry at index %lu not in log (last=%lu)",
+                  index, first_log_index + state->persistent->log_count - 1);
+        return 0;
+    }
+    
+    // Check if term matches
+    uint64_t actual_term = state->persistent->log[log_idx].term;
+    int matches = (actual_term == term);
+    
+    pthread_rwlock_unlock(&state->persistent->lock);
+    
+    if (!matches) {
+        LOG_DEBUG("Raft: Entry at index %lu has wrong term (expected=%lu, actual=%lu)",
+                  index, term, actual_term);
+    }
+    
+    return matches;
+}
+
+int raft_append_log_entries(raft_state_t *state, 
+                             const raft_log_entry_t *entries,
+                             size_t count, 
+                             uint64_t prev_index) {
+    if (!state) return -1;
+    if (count == 0) return 0; // Nothing to append
+    if (!entries) return -1;
+    
+    pthread_rwlock_wrlock(&state->persistent->lock);
+    
+    uint64_t first_log_index = state->persistent->snapshot_last_index + 1;
+    
+    LOG_DEBUG("Raft: Appending %zu entries after prev_index=%lu (log_count=%zu)",
+              count, prev_index, state->persistent->log_count);
+    
+    // Raft §5.3: If an existing entry conflicts with a new one (same index,
+    // different terms), delete the existing entry and all that follow it
+    
+    for (size_t i = 0; i < count; i++) {
+        const raft_log_entry_t *new_entry = &entries[i];
+        uint64_t entry_index = prev_index + i + 1;
+        
+        // Skip entries that are in snapshot range
+        if (entry_index <= state->persistent->snapshot_last_index) {
+            LOG_DEBUG("Raft: Skipping entry at index %lu (in snapshot)", entry_index);
+            continue;
+        }
+        
+        // Convert to log array index
+        if (entry_index < first_log_index) {
+            // This shouldn't happen, but handle it gracefully
+            LOG_WARN("Raft: Entry index %lu is before log start (%lu)",
+                     entry_index, first_log_index);
+            continue;
+        }
+        
+        size_t log_idx = entry_index - first_log_index;
+        
+        // Check if entry already exists at this position
+        if (log_idx < state->persistent->log_count) {
+            raft_log_entry_t *existing = &state->persistent->log[log_idx];
+            
+            // Check for conflict (same index, different terms)
+            if (existing->term != new_entry->term) {
+                // CONFLICT DETECTED!
+                LOG_INFO("Raft: Log conflict at index %lu (our term=%lu, new term=%lu) - truncating",
+                         entry_index, existing->term, new_entry->term);
+                
+                // Free all entries from this point onwards
+                for (size_t j = log_idx; j < state->persistent->log_count; j++) {
+                    if (state->persistent->log[j].data) {
+                        safe_free(state->persistent->log[j].data);
+                        state->persistent->log[j].data = NULL;
+                    }
+                }
+                
+                // Truncate log at conflict point
+                state->persistent->log_count = log_idx;
+                
+                // Now fall through to append the new entry
+            } else if (existing->index == new_entry->index) {
+                // Entry already exists with same term - skip it
+                LOG_DEBUG("Raft: Entry at index %lu already exists (term=%lu) - skipping",
+                          entry_index, new_entry->term);
+                continue;
+            }
+        }
+        
+        // Append new entry (either after truncation or at end of log)
+        if (state->persistent->log_count >= state->persistent->log_capacity) {
+            LOG_ERROR("Raft: Log full (capacity=%zu), cannot append entry at index %lu",
+                      state->persistent->log_capacity, entry_index);
+            pthread_rwlock_unlock(&state->persistent->lock);
+            return -1;
+        }
+        
+        raft_log_entry_t *dest = &state->persistent->log[state->persistent->log_count];
+        
+        // Copy entry metadata
+        dest->term = new_entry->term;
+        dest->index = entry_index;
+        dest->type = new_entry->type;
+        dest->timestamp_ms = new_entry->timestamp_ms;
+        dest->client_id = new_entry->client_id;
+        
+        // Deep copy data
+        if (new_entry->data && new_entry->data_len > 0) {
+            dest->data = safe_malloc(new_entry->data_len);
+            if (!dest->data) {
+                LOG_ERROR("Raft: Failed to allocate %zu bytes for entry data",
+                          new_entry->data_len);
+                pthread_rwlock_unlock(&state->persistent->lock);
+                return -1;
+            }
+            memcpy(dest->data, new_entry->data, new_entry->data_len);
+            dest->data_len = new_entry->data_len;
+        } else {
+            dest->data = NULL;
+            dest->data_len = 0;
+        }
+        
+        state->persistent->log_count++;
+        
+        LOG_DEBUG("Raft: Appended entry at index %lu (term=%lu, type=%d, data_len=%zu)",
+                  entry_index, new_entry->term, new_entry->type, new_entry->data_len);
+    }
+    
+    // Verify log consistency after append
+    uint64_t last_index = first_log_index + state->persistent->log_count - 1;
+    LOG_DEBUG("Raft: After append - log_count=%zu, last_index=%lu",
+              state->persistent->log_count, last_index);
+    
+    pthread_rwlock_unlock(&state->persistent->lock);
+    
+    return 0;
 }

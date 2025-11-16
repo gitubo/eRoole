@@ -12,13 +12,6 @@
 #include <string.h>
 
 // Forward declarations from raft_state.c (internal functions)
-extern void reset_election_timer(raft_state_t *state);
-extern int is_log_up_to_date(raft_state_t *state, uint64_t candidate_last_index,
-                             uint64_t candidate_last_term);
-extern int log_contains_entry(raft_state_t *state, uint64_t index, uint64_t term);
-extern void append_log_entries(raft_state_t *state, const raft_log_entry_t *entries,
-                               size_t count, uint64_t prev_index);
-extern void become_follower(raft_state_t *state, uint64_t term);
 static void raft_free_append_entries_req(raft_append_entries_req_t *req);
 static void raft_free_install_snapshot_req(raft_install_snapshot_req_t *req);
 
@@ -75,7 +68,7 @@ int handle_raft_request_vote(const uint8_t *request,
         voted_for = 0;
         
         pthread_rwlock_unlock(&state->persistent->lock);
-        become_follower(state, req.term);
+        raft_become_follower(state, req.term);
         pthread_rwlock_wrlock(&state->persistent->lock);
     }
     
@@ -98,7 +91,7 @@ int handle_raft_request_vote(const uint8_t *request,
     if (can_vote) {
         pthread_rwlock_unlock(&state->persistent->lock);
         
-        int log_ok = is_log_up_to_date(state, req.last_log_index, req.last_log_term);
+        int log_ok = raft_is_log_up_to_date(state, req.last_log_index, req.last_log_term);
         
         pthread_rwlock_wrlock(&state->persistent->lock);
         
@@ -110,7 +103,7 @@ int handle_raft_request_vote(const uint8_t *request,
             pthread_rwlock_unlock(&state->persistent->lock);
             
             // Reset election timer (we just voted for someone)
-            reset_election_timer(state);
+            raft_reset_election_timer(state);
             
             LOG_INFO("Raft: Granted vote to candidate %u (term=%lu)",
                      req.candidate_id, req.term);
@@ -202,7 +195,7 @@ int handle_raft_append_entries(const uint8_t *request,
         current_term = req.term;
         
         pthread_rwlock_unlock(&state->persistent->lock);
-        become_follower(state, req.term);
+        raft_become_follower(state, req.term);
         pthread_rwlock_wrlock(&state->persistent->lock);
     }
     
@@ -220,7 +213,7 @@ int handle_raft_append_entries(const uint8_t *request,
     
     // Valid leader - reset election timer
     pthread_rwlock_unlock(&state->persistent->lock);
-    reset_election_timer(state);
+    raft_reset_election_timer(state);
     
     // Update current leader
     pthread_mutex_lock(&state->volatile_state->lock);
@@ -230,7 +223,7 @@ int handle_raft_append_entries(const uint8_t *request,
     pthread_rwlock_wrlock(&state->persistent->lock);
     
     // Rule 3: Reply false if log doesn't contain entry at prevLogIndex with prevLogTerm
-    if (!log_contains_entry(state, req.prev_log_index, req.prev_log_term)) {
+    if (!raft_log_contains_entry(state, req.prev_log_index, req.prev_log_term)) {
         LOG_DEBUG("Raft: Log inconsistency at prev_index=%lu prev_term=%lu",
                   req.prev_log_index, req.prev_log_term);
         resp.success = 0;
@@ -240,7 +233,7 @@ int handle_raft_append_entries(const uint8_t *request,
     
     // Rule 4 & 5: Append entries
     if (req.entry_count > 0) {
-        append_log_entries(state, req.entries, req.entry_count, req.prev_log_index);
+        raft_append_log_entries(state, req.entries, req.entry_count, req.prev_log_index);
         
         LOG_INFO("Raft: Appended %zu entries starting at index %lu",
                  req.entry_count, req.prev_log_index + 1);
@@ -341,7 +334,7 @@ int handle_raft_install_snapshot(const uint8_t *request,
         state->persistent->voted_for = 0;
         
         pthread_rwlock_unlock(&state->persistent->lock);
-        become_follower(state, req.term);
+        raft_become_follower(state, req.term);
         pthread_rwlock_wrlock(&state->persistent->lock);
     }
     
@@ -358,7 +351,7 @@ int handle_raft_install_snapshot(const uint8_t *request,
     pthread_rwlock_unlock(&state->persistent->lock);
     
     // Reset election timer
-    reset_election_timer(state);
+    raft_reset_election_timer(state);
     
     // Update current leader
     pthread_mutex_lock(&state->volatile_state->lock);
