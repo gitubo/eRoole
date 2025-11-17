@@ -48,7 +48,10 @@ static void on_gossip_membership_event(node_id_t node_id,
         // New peer joined → add to Raft cluster
         LOG_INFO("Adding peer %u to Raft cluster (%s:%u)", 
                  node_id, ip, data_port);
-        
+        if (data_port == 0) {
+            LOG_ERROR("Cannot add peer %u: data_port is 0!", node_id);
+            return;  
+        }
         if (raft_add_peer(state->raft_state, node_id, ip, data_port) == 0) {
             LOG_INFO("✓ Peer %u added to Raft cluster", node_id);
             
@@ -298,6 +301,7 @@ result_t node_state_init(node_state_t **out_state, const roole_config_t *config)
         safe_free(state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Membership initialization failed");
     }
+    LOG_INFO("Initializing membership with data_port=%u", state->identity.data_port);
     
     // Set gossip callback to bridge to Raft
     membership_set_callback(state->membership, 

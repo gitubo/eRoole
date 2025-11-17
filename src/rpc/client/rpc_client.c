@@ -256,9 +256,16 @@ int rpc_client_call(rpc_client_t *client, uint8_t func_id,
         return RPC_STATUS_BAD_ARGUMENT;
     }
     
-    size_t msg_len = rpc_pack_message(tx_buffer, client->local_node_id, request_id,
-                                      RPC_TYPE_REQUEST, RPC_STATUS_SUCCESS, func_id,
-                                      request, request_len);
+    size_t msg_len = rpc_pack_message(tx_buffer, tx_buffer_size,
+                                    client->local_node_id, request_id,
+                                    RPC_TYPE_REQUEST, RPC_STATUS_SUCCESS, func_id,
+                                    request, request_len);
+
+    if (msg_len == 0) {
+        pthread_mutex_unlock(&client->lock);
+        LOG_ERROR("Failed to pack request (message too large for buffer)");
+        return RPC_STATUS_INTERNAL_ERROR;
+    }
     
     // Send request
     int sockfd = rpc_channel_get_fd(&client->channel);
@@ -352,9 +359,16 @@ int rpc_client_send_async(rpc_client_t *client, uint8_t func_id,
         return -1;
     }
     
-    size_t msg_len = rpc_pack_message(tx_buffer, client->local_node_id, request_id,
-                                      RPC_TYPE_REQUEST, RPC_STATUS_SUCCESS, func_id,
-                                      request, request_len);
+    size_t msg_len = rpc_pack_message(tx_buffer, tx_buffer_size,
+                                    client->local_node_id, request_id,
+                                    RPC_TYPE_REQUEST, RPC_STATUS_SUCCESS, func_id,
+                                    request, request_len);
+
+    if (msg_len == 0) {
+        pthread_mutex_unlock(&client->lock);
+        LOG_ERROR("Failed to pack async request");
+        return -1;
+    }
     
     int sockfd = rpc_channel_get_fd(&client->channel);
     ssize_t sent = send(sockfd, tx_buffer, msg_len, 0);

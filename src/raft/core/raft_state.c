@@ -227,6 +227,56 @@ static int should_start_election(raft_state_t *state) {
     return (elapsed > timeout);
 }
 
+// ============================================================================
+// HELPER: Reconnect to peer if connection is dead
+// ============================================================================
+
+static int ensure_peer_connected(raft_state_t *state, size_t peer_idx) {
+    rpc_client_t *client = state->peer_clients[peer_idx];
+    node_id_t peer_id = state->leader_state->peers[peer_idx];
+    
+    if (!client) {
+        LOG_ERROR("Raft: No RPC client for peer %u at index %zu", peer_id, peer_idx);
+        return -1;
+    }
+    
+    // ✅ ADD: Test if connection is alive by checking socket state
+    rpc_channel_t *channel = rpc_client_get_channel(client);
+    if (!channel || !channel->is_open) {
+        LOG_WARN("Raft: Connection to peer %u is dead, reconnecting...", peer_id);
+        
+        // Close old connection
+        rpc_client_close(client);
+        
+        // Get peer info from cluster view
+        cluster_member_t *member = cluster_view_get(state->cluster_view, peer_id);
+        if (!member) {
+            LOG_ERROR("Raft: Peer %u not found in cluster view", peer_id);
+            return -1;
+        }
+        
+        char peer_ip[MAX_IP_LEN];
+        uint16_t peer_port = member->data_port;
+        strncpy(peer_ip, member->ip_address, MAX_IP_LEN);
+        cluster_view_release(state->cluster_view);
+        
+        // Reconnect
+        rpc_client_t *new_client = rpc_client_connect(peer_ip, peer_port,
+                                                       RPC_CHANNEL_DATA, 8192);
+        if (!new_client) {
+            LOG_ERROR("Raft: Failed to reconnect to peer %u (%s:%u)", 
+                     peer_id, peer_ip, peer_port);
+            state->peer_clients[peer_idx] = NULL;
+            return -1;
+        }
+        
+        state->peer_clients[peer_idx] = new_client;
+        LOG_INFO("Raft: Reconnected to peer %u (%s:%u)", peer_id, peer_ip, peer_port);
+    }
+    
+    return 0;
+}
+
 static void start_election(raft_state_t *state) {
     // Transition to candidate
     become_candidate(state);
@@ -259,6 +309,12 @@ static void start_election(raft_state_t *state) {
     
     for (size_t i = 0; i < state->leader_state->peer_count; i++) {
         node_id_t peer_id = state->leader_state->peers[i];
+
+        if (ensure_peer_connected(state, i) != 0) {
+            LOG_WARN("Raft: Cannot reach peer %u, skipping vote request", peer_id);
+            continue;
+        }
+
         rpc_client_t *client = state->peer_clients[i];
         
         if (!client) continue;
@@ -276,7 +332,12 @@ static void start_election(raft_state_t *state) {
         int status = raft_rpc_request_vote(client, &req, &resp, state->config.rpc_timeout_ms);
         
         if (status != RPC_STATUS_SUCCESS) {
-            LOG_WARN("Raft: RequestVote to peer %u failed", peer_id);
+            LOG_WARN("Raft: RequestVote to peer %u failed (status=%d)", peer_id, status);
+            
+            rpc_channel_t *channel = rpc_client_get_channel(client);
+            if (channel && status == RPC_STATUS_NETWORK) {
+                channel->is_open = 0;  // Force reconnect on next attempt
+            }
             continue;
         }
         
@@ -344,6 +405,12 @@ static void* election_timer_thread_fn(void *arg) {
 
 static void send_append_entries_to_peer(raft_state_t *state, size_t peer_idx) {
     node_id_t peer_id = state->leader_state->peers[peer_idx];
+
+    if (ensure_peer_connected(state, peer_idx) != 0) {
+        LOG_WARN("Raft: Cannot reach peer %u for AppendEntries", peer_id);
+        return;
+    }
+
     rpc_client_t *client = state->peer_clients[peer_idx];
     
     if (!client) return;
@@ -387,7 +454,14 @@ static void send_append_entries_to_peer(raft_state_t *state, size_t peer_idx) {
     state->stats.append_entries_sent++;
     
     if (status != RPC_STATUS_SUCCESS) {
-        LOG_WARN("Raft: AppendEntries to peer %u failed", peer_id);
+        LOG_WARN("Raft: AppendEntries to peer %u failed (status=%d)", peer_id, status);
+        
+        if (status == RPC_STATUS_NETWORK) {
+            rpc_channel_t *channel = rpc_client_get_channel(client);
+            if (channel) {
+                channel->is_open = 0;
+            }
+        }
         return;
     }
     

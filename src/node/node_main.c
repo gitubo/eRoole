@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
     
     // Initialize logger
     logger_init();
-    logger_set_level(LOG_LEVEL_INFO);
+    logger_set_level(LOG_LEVEL_DEBUG);
     
     LOG_INFO("Starting Roole datastore node...");
     LOG_INFO("  Config file: %s", config_path);

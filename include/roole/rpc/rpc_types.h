@@ -77,8 +77,9 @@ typedef struct {
 } rpc_header_t;
 
 // Serialization functions
-size_t rpc_pack_message(uint8_t *buffer, node_id_t node_id, uint32_t request_id,
-                        uint8_t type, uint8_t status, uint8_t func_id,
+size_t rpc_pack_message(uint8_t *buffer, size_t buffer_size,
+                        node_id_t node_id, uint32_t request_id, 
+                        uint8_t type, uint8_t status, uint8_t func_id, 
                         const uint8_t *payload, size_t payload_len);
 
 int rpc_unpack_header(const uint8_t *buffer, rpc_header_t *header);

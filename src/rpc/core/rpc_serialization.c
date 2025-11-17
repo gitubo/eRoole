@@ -1,14 +1,23 @@
 // src/rpc/core/rpc_serialization.c
 #include "roole/rpc/rpc_types.h"
 #include "roole/core/common.h"
+#include "roole/logger/logger.h"
 #include <arpa/inet.h>
 #include <string.h>
 
-size_t rpc_pack_message(uint8_t *buffer, node_id_t node_id, uint32_t request_id, 
-                         uint8_t type, uint8_t status, uint8_t func_id, 
-                         const uint8_t *payload, size_t payload_len) {
+size_t rpc_pack_message(uint8_t *buffer, size_t buffer_size,
+                        node_id_t node_id, uint32_t request_id, 
+                        uint8_t type, uint8_t status, uint8_t func_id, 
+                        const uint8_t *payload, size_t payload_len) {
     
     uint32_t total_len = (uint32_t)(RPC_HEADER_SIZE + payload_len);
+    
+    if (total_len > buffer_size) {
+        LOG_ERROR("rpc_pack_message: message too large (%u bytes > buffer %zu bytes)", 
+                  total_len, buffer_size);
+        return 0;
+    }
+    
     uint32_t net_total_len = htonl(total_len);
     uint32_t net_request_id = htonl(request_id);
     uint16_t net_node_id = htons(node_id);

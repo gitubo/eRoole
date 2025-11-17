@@ -127,17 +127,30 @@ static void process_request(rpc_server_t *server, connection_state_t *conn,
     uint8_t *tx_buffer = rpc_channel_get_tx_buffer(&conn->channel);
     size_t tx_buffer_size = rpc_channel_get_tx_buffer_size(&conn->channel);
     
-    size_t response_msg_len = rpc_pack_message(tx_buffer, 0, header->request_id,
-                                               RPC_TYPE_RESPONSE, status,
-                                               header->func_id,
-                                               response_payload, response_len);
+    size_t response_msg_len = rpc_pack_message(tx_buffer, tx_buffer_size,
+                                            0, header->request_id,
+                                            RPC_TYPE_RESPONSE, status,
+                                            header->func_id,
+                                            response_payload, response_len);
+
+    // ✅ ADD: Check for packing failure
+    if (response_msg_len == 0) {
+        LOG_ERROR("Failed to pack response (buffer too small)");
+        // Send minimal error response
+        response_msg_len = rpc_pack_message(tx_buffer, tx_buffer_size,
+                                        0, header->request_id,
+                                        RPC_TYPE_RESPONSE, RPC_STATUS_INTERNAL_ERROR,
+                                        header->func_id, NULL, 0);
+    }
     
+    //redundant check, keep for safety
     if (response_msg_len > tx_buffer_size) {
         LOG_ERROR("Response too large: %zu > %zu", response_msg_len, tx_buffer_size);
         // Try to send error response without payload
-        response_msg_len = rpc_pack_message(tx_buffer, 0, header->request_id,
-                                           RPC_TYPE_RESPONSE, RPC_STATUS_INTERNAL_ERROR,
-                                           header->func_id, NULL, 0);
+        response_msg_len = rpc_pack_message(tx_buffer, tx_buffer_size,
+                                       0, header->request_id,
+                                       RPC_TYPE_RESPONSE, RPC_STATUS_INTERNAL_ERROR,
+                                       header->func_id, NULL, 0);
     }
     
     ssize_t sent = send(conn->fd, tx_buffer, response_msg_len, MSG_NOSIGNAL);
