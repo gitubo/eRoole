@@ -320,6 +320,9 @@ void node_metrics_update_periodic(node_state_t *state) {
                                                      memory_order_relaxed);
             metrics_gauge_set(state->metric_raft_elections_total, (double)elections);
         }
+    } else {
+        LOG_DEBUG("Raft operational metrics not available (op_metrics=%p)",
+                  (void*)(state->raft_state ? state->raft_state->op_metrics : NULL));
     }
     
     // ========================================================================

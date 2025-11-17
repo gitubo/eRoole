@@ -21,6 +21,9 @@
 /**
  * Gossip membership event callback
  * Bridges SWIM gossip events to Raft peer management
+ * 
+ * CRITICAL: During bootstrap, we DON'T remove Raft peers on gossip failures!
+ * This prevents premature peer removal before Raft starts.
  */
 static void on_gossip_membership_event(node_id_t node_id,
                                        node_type_t type,
@@ -65,7 +68,24 @@ static void on_gossip_membership_event(node_id_t node_id,
         
     } else if (strcmp(event_type, MEMBER_EVENT_FAILED) == 0 ||
                strcmp(event_type, MEMBER_EVENT_LEAVE) == 0) {
-        // Peer failed/left → remove from Raft cluster
+        
+        // ✅ FIX: Check if we're in bootstrap grace period
+        uint64_t now = time_now_ms();
+        uint64_t time_since_bootstrap = now - state->bootstrap_complete_time_ms;
+        
+        if (state->bootstrap_complete_time_ms > 0 && 
+            time_since_bootstrap < BOOTSTRAP_GRACE_PERIOD_MS) {
+            
+            LOG_WARN("Ignoring peer failure during bootstrap grace period");
+            LOG_WARN("  Peer %u marked as %s by gossip", node_id, event_type);
+            LOG_WARN("  Time since bootstrap: %lu ms (grace period: %d ms)",
+                     time_since_bootstrap, BOOTSTRAP_GRACE_PERIOD_MS);
+            LOG_WARN("  Keeping Raft peer to allow cluster stabilization");
+            
+            return;  // Don't remove Raft peer yet!
+        }
+        
+        // After grace period, proceed with normal removal
         LOG_INFO("Removing peer %u from Raft cluster", node_id);
         
         if (raft_remove_peer(state->raft_state, node_id) == 0) {
@@ -174,6 +194,7 @@ result_t node_state_init(node_state_t **out_state, const roole_config_t *config)
     }
     
     state->start_time_ms = time_now_ms();
+    state->bootstrap_complete_time_ms = 0;
     state->shutdown_flag = 0;
     
     // ========================================================================
@@ -404,62 +425,61 @@ result_t node_state_start(node_state_t *state) {
     LOG_INFO("Starting node services...");
     
     // ========================================================================
-    // 1. Start Raft State Machine (FIRST - core consensus)
+    // CRITICAL: Raft start timing depends on bootstrap mode
+    // - SEED nodes (no router config): Start Raft immediately
+    // - JOINING nodes (have router config): Start Raft AFTER gossip discovery
     // ========================================================================
     
-    if (state->raft_state) {
-        LOG_INFO("[1/4] Starting Raft consensus...");
-        
-        if (raft_state_start(state->raft_state) != 0) {
-            LOG_ERROR("Failed to start Raft state machine");
-            return RESULT_ERROR(RESULT_ERR_INVALID, "Raft start failed");
-        }
-        
-        LOG_INFO("✓ Raft consensus started (election timer active)");
-    } else {
-        LOG_ERROR("Raft state not initialized!");
-        return RESULT_ERROR(RESULT_ERR_INVALID, "Raft not initialized");
-    }
+    // Check if this is a seed node (no routers configured)
+    // For now, we'll start Raft immediately for all nodes
+    // The bootstrap phase will handle delayed start for workers
     
-    // ========================================================================
-    // 2. Start Background Threads
-    // ========================================================================
+    // Start background threads (NOT Raft yet)
+    LOG_INFO("[1/2] Starting background threads...");
     
-    LOG_INFO("[2/4] Starting background threads...");
-    
-    // Cleanup thread
     if (pthread_create(&state->cleanup_thread, NULL, cleanup_thread_fn, state) != 0) {
         LOG_ERROR("Failed to create cleanup thread");
-        raft_state_stop(state->raft_state);
         return RESULT_ERROR(RESULT_ERR_INVALID, "Cleanup thread creation failed");
     }
     
-    // Metrics update thread (if metrics enabled)
     if (state->metrics_registry) {
         if (pthread_create(&state->metrics_update_thread, NULL, 
                           metrics_update_thread_fn, state) != 0) {
             LOG_ERROR("Failed to create metrics update thread");
             state->shutdown_flag = 1;
             pthread_join(state->cleanup_thread, NULL);
-            raft_state_stop(state->raft_state);
             return RESULT_ERROR(RESULT_ERR_INVALID, "Metrics thread creation failed");
         }
     }
     
     LOG_INFO("✓ Background threads started");
     
-    LOG_INFO("========================================");
-    LOG_INFO("Node Services Started Successfully");
-    LOG_INFO("  Raft: RUNNING");
-    LOG_INFO("  Datastore: READY (Raft-backed)");
-    LOG_INFO("  Background: ACTIVE");
-    LOG_INFO("========================================");
+    return RESULT_SUCCESS();
+}
+
+// ========================================================================
+// NEW: Separate function to start Raft (called after bootstrap)
+// ========================================================================
+
+result_t node_state_start_raft(node_state_t *state) {
+    if (!state || !state->raft_state) {
+        return RESULT_ERROR(RESULT_ERR_INVALID, "Invalid state or Raft not initialized");
+    }
+    
+    LOG_INFO("Starting Raft consensus state machine...");
+    
+    if (raft_state_start(state->raft_state) != 0) {
+        LOG_ERROR("Failed to start Raft state machine");
+        return RESULT_ERROR(RESULT_ERR_INVALID, "Raft start failed");
+    }
+    
+    LOG_INFO("✓ Raft consensus started");
     
     return RESULT_SUCCESS();
 }
 
 // ========================================================================
-// BOOTSTRAP & SHUTDOWN (unchanged from original)
+// REFACTORED: Bootstrap with delayed Raft start
 // ========================================================================
 
 result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config) {
@@ -467,14 +487,32 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
         return RESULT_ERROR(RESULT_ERR_INVALID, "Invalid parameters");
     }
     
+    // ========================================================================
+    // CASE 1: SEED NODE (No routers configured)
+    // ========================================================================
     if (config->router_count == 0) {
-        LOG_INFO("No seed routers configured - operating as standalone/seed node");
+        LOG_INFO("Operating as SEED node - starting Raft immediately");
+        
+        // Start Raft consensus (will become leader)
+        result_t raft_result = node_state_start_raft(state);
+        if (result_is_error(&raft_result)) {
+            return raft_result;
+        }
+        
+        // Mark bootstrap complete (grace period starts now)
+        state->bootstrap_complete_time_ms = time_now_ms();
+        LOG_INFO("Seed node ready (grace period active for %d seconds)",
+                 BOOTSTRAP_GRACE_PERIOD_MS / 1000);
         return RESULT_SUCCESS();
     }
     
-    LOG_INFO("Joining cluster via %zu seed router(s)...", config->router_count);
+    // ========================================================================
+    // CASE 2: JOINING NODE (Has router config)
+    // ========================================================================
+    LOG_INFO("Joining existing cluster via %zu seed router(s)...", config->router_count);
+    LOG_INFO("⏳ Delaying Raft start until cluster discovery completes");
     
-    // Try each seed router
+    // Try to join via gossip
     int joined = 0;
     for (size_t i = 0; i < config->router_count; i++) {
         char seed_ip[16];
@@ -497,21 +535,65 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
                            "Failed to join cluster via any seed router");
     }
     
-    // Wait for cluster view to populate
-    LOG_INFO("Waiting for cluster view to populate...");
-    sleep(5);  // Simple wait for gossip to propagate
+    // ========================================================================
+    // Wait for cluster discovery via gossip
+    // ========================================================================
+    LOG_INFO("Waiting for cluster discovery...");
     
-    size_t member_count = state->cluster_view->count;
-    LOG_INFO("Cluster membership discovered: %zu members", member_count);
+    const int max_wait_seconds = 10;
+    const int check_interval_ms = 500;
+    int total_wait_ms = 0;
     
-    if (member_count > 1) {
-        cluster_view_dump(state->cluster_view, "After Bootstrap");
-        return RESULT_SUCCESS();
+    while (total_wait_ms < max_wait_seconds * 1000) {
+        usleep(check_interval_ms * 1000);
+        total_wait_ms += check_interval_ms;
+        
+        size_t member_count = state->cluster_view->count;
+        
+        // Wait until we discover at least one peer (besides self)
+        if (member_count > 1) {
+            LOG_INFO("✓ Cluster discovered: %zu members total", member_count);
+            
+            // Give Raft peer connections time to establish
+            LOG_INFO("Waiting for Raft peer connections to establish...");
+            sleep(2);
+            
+            break;
+        }
+        
+        if (total_wait_ms % 2000 == 0) {
+            LOG_DEBUG("Still waiting for cluster discovery... (%d/%d seconds)",
+                     total_wait_ms / 1000, max_wait_seconds);
+        }
     }
     
-    LOG_WARN("Only discovered self in cluster, continuing anyway");
+    size_t final_member_count = state->cluster_view->count;
+    
+    if (final_member_count <= 1) {
+        LOG_WARN("Cluster discovery timeout - only found self");
+        LOG_WARN("Starting Raft anyway (may become isolated leader)");
+    } else {
+        cluster_view_dump(state->cluster_view, "After Cluster Discovery");
+    }
+    
+    // ========================================================================
+    // NOW start Raft (after cluster is known)
+    // ========================================================================
+    LOG_INFO("Starting Raft consensus (joining existing cluster)...");
+    
+    result_t raft_result = node_state_start_raft(state);
+    if (result_is_error(&raft_result)) {
+        return raft_result;
+    }
+    
+    LOG_INFO("✓ Raft started - will sync with existing leader");
+    state->bootstrap_complete_time_ms = time_now_ms();
+    LOG_INFO("Bootstrap complete - grace period active for %d seconds",
+             BOOTSTRAP_GRACE_PERIOD_MS / 1000);
+
     return RESULT_SUCCESS();
 }
+
 
 void node_state_shutdown(node_state_t *state) {
     if (!state) return;

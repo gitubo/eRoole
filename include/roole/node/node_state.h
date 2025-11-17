@@ -73,8 +73,12 @@ typedef struct node_state {
     
     // Lifecycle
     uint64_t start_time_ms;
+    uint64_t bootstrap_complete_time_ms;
     volatile int shutdown_flag;
     
+    // Bootstrap grace period (don't remove Raft peers on gossip failures during this time)
+    #define BOOTSTRAP_GRACE_PERIOD_MS 30000  // 30 seconds
+
     // Background threads
     pthread_t cleanup_thread;
     pthread_t metrics_update_thread;
@@ -86,6 +90,7 @@ typedef struct node_state {
     volatile int rpc_server_ready;
     pthread_mutex_t rpc_ready_lock;
     pthread_cond_t rpc_ready_cond;
+
 } node_state_t;
 
 /**
@@ -146,5 +151,32 @@ typedef struct {
 } node_statistics_t;
 
 void node_state_get_statistics(const node_state_t *state, node_statistics_t *stats);
+
+/**
+ * Start node
+ * Starts background threads (NOT Raft - see node_state_start_raft)
+ * @param state Node state
+ * @return result_t
+ */
+result_t node_state_start(node_state_t *state);
+
+/**
+ * Start Raft consensus
+ * Starts Raft state machine (election timer, heartbeat, apply threads)
+ * Called internally by node_state_bootstrap() at the right time
+ * @param state Node state
+ * @return result_t
+ */
+result_t node_state_start_raft(node_state_t *state);
+
+/**
+ * Bootstrap node (join cluster)
+ * For seed nodes: Starts Raft immediately
+ * For joining nodes: Waits for cluster discovery, THEN starts Raft
+ * @param state Node state
+ * @param config Configuration
+ * @return result_t
+ */
+result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config);
 
 #endif // ROOLE_NODE_STATE_H

@@ -178,6 +178,13 @@ static void become_leader(raft_state_t *state) {
     state->volatile_state->current_leader = state->my_id;
     state->stats.became_leader++;
     
+    pthread_mutex_unlock(&state->volatile_state->lock);
+    
+    // ✅ Update operational metrics
+    if (state->op_metrics) {
+        raft_metrics_set_leader(state->op_metrics, 1);
+    }
+    
     // Initialize leader state
     pthread_mutex_lock(&state->leader_state->lock);
     
@@ -191,7 +198,6 @@ static void become_leader(raft_state_t *state) {
     state->leader_state->last_heartbeat_sent_ms = time_now_ms();
     
     pthread_mutex_unlock(&state->leader_state->lock);
-    pthread_mutex_unlock(&state->volatile_state->lock);
     
     // Append no-op entry to commit entries from previous terms
     uint8_t noop = 0;
@@ -296,6 +302,10 @@ static void start_election(raft_state_t *state) {
     
     state->stats.elections_started++;
     
+    if (state->op_metrics) {
+        raft_metrics_record_election(state->op_metrics);
+    }
+
     LOG_INFO("Raft: Starting election for term %lu", term);
     
     // Count votes (start with self-vote)
@@ -304,8 +314,19 @@ static void start_election(raft_state_t *state) {
     
     LOG_DEBUG("Raft: Need %zu/%zu votes for majority", majority, state->leader_state->peer_count + 1);
     
+        if ((size_t)votes >= majority) {
+        LOG_INFO("Raft: Won election immediately (single-node cluster)");
+        state->stats.elections_won++;
+        if (state->op_metrics) {
+            raft_metrics_record_election(state->op_metrics);
+        }
+        pthread_mutex_unlock(&state->peers_lock);
+        become_leader(state);
+        return;
+    }
+
     // Send RequestVote RPCs to all peers
-    pthread_mutex_lock(&state->peers_lock);
+    //pthread_mutex_lock(&state->peers_lock);
     
     for (size_t i = 0; i < state->leader_state->peer_count; i++) {
         node_id_t peer_id = state->leader_state->peers[i];
@@ -620,6 +641,40 @@ raft_state_t* raft_state_create(node_id_t my_id,
     state->snapshot = safe_calloc(1, sizeof(raft_snapshot_t));
     pthread_mutex_init(&state->snapshot->lock, NULL);
     
+    state->op_metrics = safe_calloc(1, sizeof(raft_operational_metrics_t));
+    if (!state->op_metrics) {
+        LOG_ERROR("Failed to allocate operational metrics");
+        // Cleanup already allocated resources
+        pthread_mutex_destroy(&state->snapshot->lock);
+        safe_free(state->snapshot);
+        pthread_mutex_destroy(&state->leader_state->lock);
+        safe_free(state->leader_state);
+        pthread_mutex_destroy(&state->volatile_state->lock);
+        safe_free(state->volatile_state);
+        pthread_rwlock_destroy(&state->persistent->lock);
+        safe_free(state->persistent->log);
+        safe_free(state->persistent);
+        safe_free(state);
+        return NULL;
+    }
+    
+    // Initialize all atomic metrics to 0 (safety, even though calloc does this)
+    atomic_init(&state->op_metrics->is_leader, 0);
+    atomic_init(&state->op_metrics->leader_election_ts, 0);
+    atomic_init(&state->op_metrics->elections_total, 0);
+    atomic_init(&state->op_metrics->followers_healthy, 0);
+    atomic_init(&state->op_metrics->followers_lagging, 0);
+    atomic_init(&state->op_metrics->max_follower_lag, 0);
+    atomic_init(&state->op_metrics->commit_lag, 0);
+    atomic_init(&state->op_metrics->commit_rate, 0);
+    atomic_init(&state->op_metrics->append_entries_rtt_us, 0);
+    atomic_init(&state->op_metrics->log_replication_latency_ms, 0);
+    atomic_init(&state->op_metrics->rpc_failures, 0);
+    atomic_init(&state->op_metrics->log_conflicts, 0);
+    atomic_init(&state->op_metrics->state_transitions, 0);
+    
+    LOG_INFO("Operational metrics initialized");
+
     // Initialize stats
     pthread_mutex_init(&state->stats.lock, NULL);
     pthread_mutex_init(&state->peers_lock, NULL);
