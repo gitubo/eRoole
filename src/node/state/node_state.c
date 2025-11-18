@@ -75,13 +75,7 @@ static void on_gossip_membership_event(node_id_t node_id,
         
         if (state->bootstrap_complete_time_ms > 0 && 
             time_since_bootstrap < BOOTSTRAP_GRACE_PERIOD_MS) {
-            
             LOG_WARN("Ignoring peer failure during bootstrap grace period");
-            LOG_WARN("  Peer %u marked as %s by gossip", node_id, event_type);
-            LOG_WARN("  Time since bootstrap: %lu ms (grace period: %d ms)",
-                     time_since_bootstrap, BOOTSTRAP_GRACE_PERIOD_MS);
-            LOG_WARN("  Keeping Raft peer to allow cluster stabilization");
-            
             return;  // Don't remove Raft peer yet!
         }
         
@@ -581,15 +575,16 @@ result_t node_state_bootstrap(node_state_t *state, const roole_config_t *config)
     // ========================================================================
     LOG_INFO("Starting Raft consensus (joining existing cluster)...");
     
-    result_t raft_result = node_state_start_raft(state);
-    if (result_is_error(&raft_result)) {
-        return raft_result;
-    }
-    
     LOG_INFO("✓ Raft started - will sync with existing leader");
     state->bootstrap_complete_time_ms = time_now_ms();
     LOG_INFO("Bootstrap complete - grace period active for %d seconds",
              BOOTSTRAP_GRACE_PERIOD_MS / 1000);
+
+    // NOW start Raft (after grace period is active)
+    result_t raft_result = node_state_start_raft(state);
+    if (result_is_error(&raft_result)) {
+        return raft_result;
+    }
 
     return RESULT_SUCCESS();
 }

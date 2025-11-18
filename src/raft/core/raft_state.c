@@ -284,6 +284,25 @@ static int ensure_peer_connected(raft_state_t *state, size_t peer_idx) {
 }
 
 static void start_election(raft_state_t *state) {
+    pthread_rwlock_rdlock(&state->cluster_view->lock);
+    
+    size_t alive_peers = 0;
+    for (size_t i = 0; i < state->cluster_view->count; i++) {
+        if (state->cluster_view->members[i].status == NODE_STATUS_ALIVE &&
+            state->cluster_view->members[i].node_id != state->my_id) {
+            alive_peers++;
+        }
+    }
+    
+    pthread_rwlock_unlock(&state->cluster_view->lock);
+    
+    // Don't start election if we're isolated (no alive peers)
+    if (state->leader_state->peer_count > 0 && alive_peers == 0) {
+        LOG_WARN("Raft: Cannot start election - no alive peers in cluster view");
+        LOG_WARN("  This node appears isolated. Waiting for network recovery...");
+        return;
+    }
+
     // Transition to candidate
     become_candidate(state);
     

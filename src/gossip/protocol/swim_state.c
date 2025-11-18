@@ -117,11 +117,16 @@ void gossip_protocol_run_swim_round(gossip_protocol_t *proto)
     // Get target info
     cluster_member_t *target_member = cluster_view_get(proto->cluster_view, target);
     if (!target_member) return;
-    
+        
     char target_ip[MAX_IP_LEN];
     uint16_t target_port = target_member->gossip_port;
     safe_strncpy(target_ip, target_member->ip_address, MAX_IP_LEN);
-    
+    if (strcmp(target_ip, "0.0.0.0") == 0) {
+        LOG_ERROR("SWIM: Cannot send to 0.0.0.0, peer %u has invalid IP", target_member->node_id);
+        cluster_view_release(proto->cluster_view);
+        return;
+    }
+
     cluster_view_release(proto->cluster_view);
     
     // Build PING message with cluster state
@@ -186,6 +191,51 @@ void gossip_protocol_run_swim_round(gossip_protocol_t *proto)
     
     LOG_DEBUG("SWIM: Sent PING to node %u (%s:%u, updates=%u)",
               target, target_ip, target_port, ping_msg.num_updates);
+}
+
+// src/gossip/protocol/swim_state.c (NEW function)
+static void indirect_ping_via_proxy(gossip_protocol_t *proto, node_id_t target) {
+    // Select random alive peer (not target)
+    pthread_rwlock_rdlock(&proto->cluster_view->lock);
+    
+    node_id_t proxy = 0;
+    for (size_t i = 0; i < proto->cluster_view->count; i++) {
+        cluster_member_t *m = &proto->cluster_view->members[i];
+        if (m->node_id != target && m->node_id != proto->my_id &&
+            m->status == NODE_STATUS_ALIVE) {
+            proxy = m->node_id;
+            break;
+        }
+    }
+    
+    pthread_rwlock_unlock(&proto->cluster_view->lock);
+    
+    if (proxy == 0) {
+        LOG_DEBUG("SWIM: No proxy available for indirect ping");
+        return; // Can't do indirect ping
+    }
+    
+    // Send PING-REQ to proxy, asking it to ping target
+    gossip_message_t ping_req = {
+        .version = 1,
+        .msg_type = GOSSIP_MSG_PING_REQ,
+        .sender_id = proto->my_id,
+        .sequence_num = __sync_fetch_and_add(&proto->sequence_num, 1),
+        // Piggyback target node ID in updates
+        .num_updates = 1,
+        .updates = { { .node_id = target } }
+    };
+    
+    // Get proxy info
+    cluster_member_t *proxy_member = cluster_view_get(proto->cluster_view, proxy);
+    if (proxy_member) {
+        LOG_INFO("SWIM: Indirect ping to %u via proxy %u", target, proxy);
+        proto->callbacks.on_send_message(&ping_req, 
+                                        proxy_member->ip_address,
+                                        proxy_member->gossip_port,
+                                        proto->callback_context);
+        cluster_view_release(proto->cluster_view);
+    }
 }
 
 void gossip_protocol_check_timeouts(gossip_protocol_t *proto)
