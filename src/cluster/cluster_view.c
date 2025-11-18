@@ -48,6 +48,13 @@ void cluster_view_destroy(cluster_view_t *view) {
 int cluster_view_add(cluster_view_t *view, const cluster_member_t *member) {
     if (!view || !member) return RESULT_ERR_INVALID;
     
+    if (strcmp(member->ip_address, "0.0.0.0") == 0 || 
+        member->ip_address[0] == '\0') {
+        LOG_ERROR("Cannot add member %u: invalid IP address '%s'", 
+                  member->node_id, member->ip_address);
+        return RESULT_ERR_INVALID;
+    }
+    
     pthread_rwlock_wrlock(&view->lock);
     
     // Check if node already exists

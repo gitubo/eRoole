@@ -73,6 +73,19 @@ static void handle_ping(gossip_protocol_t *proto,
     for (uint8_t i = 0; i < msg->num_updates; i++) {
         const gossip_member_update_t *upd = &msg->updates[i];
         
+        char actual_ip[MAX_IP_LEN];
+        if (upd->node_id == msg->sender_id && 
+            (strcmp(upd->ip_address, "0.0.0.0") == 0 || 
+             strcmp(upd->ip_address, "") == 0)) {
+            
+            // Use UDP source IP instead
+            safe_strncpy(actual_ip, src_ip, MAX_IP_LEN);
+            LOG_INFO("SWIM: Corrected node %u IP from 0.0.0.0 to %s (from UDP source)",
+                     upd->node_id, src_ip);
+        } else {
+            safe_strncpy(actual_ip, upd->ip_address, MAX_IP_LEN);
+        }
+
         LOG_DEBUG("SWIM: Processing update[%u]: node=%u type=%d gossip=%u data=%u status=%d",
                   i, upd->node_id, upd->node_type, 
                   upd->gossip_port, upd->data_port, upd->status);
@@ -90,7 +103,7 @@ static void handle_ping(gossip_protocol_t *proto,
                 .incarnation = upd->incarnation,
                 .last_seen_ms = time_now_ms()
             };
-            safe_strncpy(new_member.ip_address, upd->ip_address, MAX_IP_LEN);
+            safe_strncpy(new_member.ip_address, actual_ip, MAX_IP_LEN);
             
             cluster_view_add(proto->cluster_view, &new_member);
             
@@ -106,13 +119,16 @@ static void handle_ping(gossip_protocol_t *proto,
             
             // Notify callback for new members
             if (proto->callbacks.on_member_alive) {
-                proto->callbacks.on_member_alive(upd->node_id, upd, 
+                gossip_member_update_t corrected = *upd;
+                safe_strncpy(corrected.ip_address, actual_ip, MAX_IP_LEN);
+                proto->callbacks.on_member_alive(upd->node_id, &corrected, 
                                                 proto->callback_context);
             }
             
         } else {
             // ✅ Existing member - check for rejoin or status update
-            
+            cluster_view_release(proto->cluster_view);
+
             if (existing->status == NODE_STATUS_DEAD && 
                 upd->status == NODE_STATUS_ALIVE &&
                 upd->incarnation > existing->incarnation) {
