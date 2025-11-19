@@ -4,21 +4,6 @@
 #include "roole/cluster/cluster_types.h"
 #include "roole/raft/raft_state.h"
 
-/**
- * Gossip→Raft integration bridge
- * 
- * RESPONSIBILITIES:
- * ✅ Translate SWIM membership events into Raft peer operations
- * ✅ Filter out self-events
- * ✅ Handle peer discovery (JOIN)
- * ✅ Handle peer failures (FAILED, LEAVE)
- * ✅ Track peer health (SUSPECT)
- * 
- * NOT RESPONSIBLE FOR:
- * ❌ Data storage or replication (Raft's job)
- * ❌ Conflict resolution (Raft's job)
- * ❌ Consensus (Raft's job)
- */
 
 typedef struct gossip_raft_bridge gossip_raft_bridge_t;
 
