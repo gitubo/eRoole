@@ -212,6 +212,9 @@ int config_load_from_file(const char *path, roole_config_t *config) {
             else if (strcasecmp(key, "metrics_addr") == 0 || strcasecmp(key, "metrics") == 0) {
                 safe_strncpy(config->ports.metrics_addr, value, MAX_CONFIG_STRING);
             }
+            else if (strcasecmp(key, "advertise_ip") == 0) == 0) {
+                safe_strncpy(config->advertise_ip, value, MAX_IP_LEN);
+            }
         }        
         else if (strcasecmp(current_section, "Logging") == 0) {
             if (strcasecmp(key, "level") == 0) {

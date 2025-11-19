@@ -26,6 +26,8 @@ typedef struct roole_config {
     char routers[MAX_CONFIG_ROUTERS][MAX_CONFIG_STRING];
     log_level_t log_level;
     size_t router_count;
+
+    char advertise_ip[MAX_IP_LEN];
 } roole_config_t;
 
 // Load configuration from INI file

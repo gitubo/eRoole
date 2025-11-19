@@ -65,7 +65,13 @@ gossip_protocol_t* gossip_protocol_create(
     
     proto->my_id = my_id;
     proto->my_type = my_type;
-    safe_strncpy(proto->my_ip, my_ip, MAX_IP_LEN);
+        char advertise_ip[MAX_IP_LEN];
+    if (strcmp(my_ip, "0.0.0.0") == 0) {
+        get_default_advertise_ip(advertise_ip, MAX_IP_LEN);
+    } else {
+        safe_strncpy(advertise_ip, my_ip, MAX_IP_LEN);
+    }
+    safe_strncpy(proto->my_ip, advertise_ip, MAX_IP_LEN);
     proto->gossip_port = gossip_port;
     proto->data_port = data_port;
     proto->incarnation = 0;

@@ -58,7 +58,19 @@ int membership_init(membership_handle_t **handle,
     
     LOG_DEBUG("membership_init: Using shared cluster_view at %p", (void*)shared_view);
     
-    // Add self to shared cluster view (not internal copy)
+    char advertise_ip[MAX_IP_LEN];
+    if (config->advertise_ip[0] != '\0') {
+        // Use configured advertise IP
+        safe_strncpy(advertise_ip, config->advertise_ip, MAX_IP_LEN);
+    } else if (strcmp(bind_addr, "0.0.0.0") == 0) {
+        // Bind is 0.0.0.0, auto-detect advertise IP
+        get_default_advertise_ip(advertise_ip, MAX_IP_LEN);
+        LOG_INFO("Auto-detected advertise IP: %s", advertise_ip);
+    } else {
+        // Use bind address as advertise address
+        safe_strncpy(advertise_ip, bind_addr, MAX_IP_LEN);
+    }
+
     cluster_member_t self = {
         .node_id = my_id,
         .node_type = my_type,
@@ -68,10 +80,10 @@ int membership_init(membership_handle_t **handle,
         .incarnation = 0,
         .last_seen_ms = time_now_ms()
     };
-    safe_strncpy(self.ip_address, h->bind_addr, MAX_IP_LEN);
+    safe_strncpy(self.ip_address, advertise_ip, MAX_IP_LEN);
     
     // ✅ CHANGED: Add to shared_view instead of internal_view
-    cluster_view_add(h->shared_view, &self);
+    cluster_view_add(shared_view, &self);
     
     gossip_config_t gossip_config = gossip_default_config();
     
